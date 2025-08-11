@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/Cuentas/static/css/main.6434ddef.css",
+    "main.js": "/Cuentas/static/js/main.9f3d7b62.js",
+    "index.html": "/Cuentas/index.html",
+    "main.6434ddef.css.map": "/Cuentas/static/css/main.6434ddef.css.map",
+    "main.9f3d7b62.js.map": "/Cuentas/static/js/main.9f3d7b62.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.6434ddef.css",
+    "static/js/main.9f3d7b62.js"
+  ]
+}
