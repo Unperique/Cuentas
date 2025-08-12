@@ -50,6 +50,9 @@ export default function Room() {
   const [selectedMember, setSelectedMember] = useState(null);
   const [userAccounts, setUserAccounts] = useState({});
   const [showIndividualDebts, setShowIndividualDebts] = useState(false);
+  const [showExpenseModal, setShowExpenseModal] = useState(false);
+  const [selectedExpense, setSelectedExpense] = useState(null);
+  const [editingExpense, setEditingExpense] = useState(null);
 
   useEffect(() => {
     if (!roomId || !currentUser) return;
@@ -209,6 +212,92 @@ export default function Room() {
     toast.success('Información copiada al portapapeles');
   }
 
+  function openExpenseModal(expense) {
+    setSelectedExpense(expense);
+    setShowExpenseModal(true);
+    // Si el usuario actual es el creador, preparar para edición
+    if (expense.createdBy === currentUser.uid) {
+      setEditingExpense({
+        description: expense.description,
+        amount: expense.amount.toString(),
+        paidBy: expense.paidBy,
+        splitBetween: [...expense.splitBetween],
+        memberShares: { ...expense.memberShares }
+      });
+    }
+  }
+
+  function closeExpenseModal() {
+    setShowExpenseModal(false);
+    setSelectedExpense(null);
+    setEditingExpense(null);
+    setMemberShares({});
+  }
+
+  async function updateExpense(e) {
+    e.preventDefault();
+    if (!editingExpense || !selectedExpense) return;
+
+    if (!editingExpense.description || !editingExpense.amount || editingExpense.splitBetween.length === 0) {
+      toast.error('Por favor completa todos los campos');
+      return;
+    }
+
+    try {
+      const amount = parseFloat(editingExpense.amount);
+      
+      // Calcular el total de participaciones
+      const totalShares = editingExpense.splitBetween.reduce((total, memberId) => {
+        return total + (editingExpense.memberShares[memberId] || 1);
+      }, 0);
+      
+      const splitAmount = amount / totalShares;
+
+      await updateDoc(doc(db, 'expenses', selectedExpense.id), {
+        description: editingExpense.description,
+        amount,
+        paidBy: editingExpense.paidBy,
+        splitBetween: editingExpense.splitBetween,
+        splitAmount,
+        memberShares: editingExpense.memberShares,
+        totalShares,
+        updatedAt: serverTimestamp()
+      });
+
+      closeExpenseModal();
+      toast.success('Gasto actualizado exitosamente');
+    } catch (error) {
+      toast.error('Error al actualizar el gasto');
+    }
+  }
+
+  function calculatePaymentSummary() {
+    if (!expenses.length || !members.length) return [];
+
+    const payments = {};
+    members.forEach(member => {
+      payments[member.id] = 0;
+    });
+
+    // Sumar todos los pagos por persona
+    expenses.forEach(expense => {
+      const paidBy = expense.paidBy;
+      const amount = parseFloat(expense.amount) || 0;
+      
+      if (payments[paidBy] !== undefined) {
+        payments[paidBy] += amount;
+      }
+    });
+
+    const result = Object.entries(payments).map(([memberId, totalPaid]) => ({
+      memberId,
+      totalPaid: parseFloat(totalPaid.toFixed(2)),
+      member: members.find(m => m.id === memberId)
+    }));
+
+    return result;
+  }
+
   function calculateDebts() {
     if (!expenses.length || !members.length) return [];
 
@@ -220,23 +309,26 @@ export default function Room() {
     expenses.forEach(expense => {
       const paidBy = expense.paidBy;
       const amount = parseFloat(expense.amount) || 0;
-      const splitAmount = parseFloat(expense.splitAmount) || 0;
+      
+      // Calcular el total de participaciones para este gasto
+      const totalShares = expense.splitBetween.reduce((total, memberId) => {
+        return total + (expense.memberShares?.[memberId] || 1);
+      }, 0);
+      
+      const amountPerShare = amount / totalShares;
 
-      // Quienes deben pagan (considerando múltiples participaciones)
+      // Quien pagó recibe crédito por el monto total
+      if (debts[paidBy] !== undefined) {
+        debts[paidBy] += amount;
+      }
+
+      // Todos los que participan deben su parte
       if (expense.splitBetween && Array.isArray(expense.splitBetween)) {
         expense.splitBetween.forEach(memberId => {
           if (debts[memberId] !== undefined) {
             const shares = expense.memberShares?.[memberId] || 1;
-            const totalDebt = splitAmount * shares;
-            
-            if (memberId === paidBy) {
-              // Si quien debe es quien pagó, recibe el dinero de las otras participaciones
-              // Solo se descuenta 1 participación (la suya propia)
-              debts[memberId] += amount - splitAmount;
-            } else {
-              // Si no pagó, debe todo lo que le corresponde
-              debts[memberId] -= totalDebt;
-            }
+            const personalDebt = amountPerShare * shares;
+            debts[memberId] -= personalDebt;
           }
         });
       }
@@ -287,6 +379,7 @@ export default function Room() {
     return individualDebts;
   }
 
+  const paymentSummary = calculatePaymentSummary();
   const debts = calculateDebts();
   const individualDebts = calculateIndividualDebts();
   const totalExpenses = expenses.reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
@@ -408,14 +501,17 @@ export default function Room() {
                     {expenses.map((expense) => {
                       const paidByMember = members.find(m => m.id === expense.paidBy);
                       return (
-                        <div key={expense.id} className="border rounded-lg p-4">
+                        <div key={expense.id} className="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
                           <div className="flex justify-between items-start">
-                            <div className="flex-1">
-                              <h3 className="font-medium text-gray-900">{expense.description}</h3>
+                            <div 
+                              className="flex-1 cursor-pointer"
+                              onClick={() => openExpenseModal(expense)}
+                            >
+                              <h3 className="font-medium text-gray-900 hover:text-blue-600">{expense.description}</h3>
                               <p className="text-sm text-gray-600">
                                 Pagado por: {paidByMember?.displayName || 'Usuario'}
                               </p>
-                                                             <p className="text-sm text-gray-600">
+                              <p className="text-sm text-gray-600">
                                  Dividido entre: {expense.splitBetween.length} personas
                                  {expense.memberShares && Object.keys(expense.memberShares).length > 0 && (
                                    <span className="text-xs text-gray-500 ml-1">
@@ -427,7 +523,10 @@ export default function Room() {
                                  )}
                                </p>
                             </div>
-                            <div className="text-right">
+                            <div 
+                              className="text-right cursor-pointer"
+                              onClick={() => openExpenseModal(expense)}
+                            >
                               <p className="text-lg font-semibold text-gray-900">
                                 ${expense.amount.toFixed(2)}
                               </p>
@@ -437,7 +536,10 @@ export default function Room() {
                             </div>
                             {expense.createdBy === currentUser.uid && (
                               <button
-                                onClick={() => deleteExpense(expense.id)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteExpense(expense.id);
+                                }}
                                 className="ml-4 text-red-600 hover:text-red-700"
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -458,29 +560,29 @@ export default function Room() {
             <div className="bg-white rounded-lg shadow">
               <div className="p-6 border-b">
                 <div className="flex justify-between items-center">
-                  <h2 className="text-lg font-semibold text-gray-900">Balance de Deudas</h2>
+                  <h2 className="text-lg font-semibold text-gray-900">{showIndividualDebts ? 'Deudas Individuales' : 'Resumen de Pagos'}</h2>
                   <button
                     onClick={() => setShowIndividualDebts(!showIndividualDebts)}
                     className="text-sm text-blue-600 hover:text-blue-800 flex items-center space-x-1"
                   >
                     <User className="h-4 w-4" />
-                    <span>{showIndividualDebts ? 'Ver balance' : 'Ver deudas'}</span>
+                    <span>{showIndividualDebts ? 'Ver pagos' : 'Ver deudas'}</span>
                   </button>
                 </div>
               </div>
               
               <div className="p-6">
                 {!showIndividualDebts ? (
-                  /* Balance General */
+                  /* Resumen de Pagos */
                   <div className="space-y-4">
-                    {debts.map(({ memberId, balance, member }) => (
+                    {paymentSummary.map(({ memberId, totalPaid, member }) => (
                       <div key={memberId} className="border rounded-lg p-3">
                         <div className="flex justify-between items-center mb-2">
                           <span className="text-sm font-medium text-gray-900">
                             {member?.displayName || 'Usuario'}
                           </span>
-                          <span className="text-sm font-semibold text-gray-900">
-                            ${Math.abs(balance).toFixed(2)}
+                          <span className="text-sm font-semibold text-green-600">
+                            ${totalPaid.toFixed(2)} pagado
                           </span>
                         </div>
                         
@@ -700,6 +802,235 @@ export default function Room() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Expense Details/Edit Modal */}
+        {showExpenseModal && selectedExpense && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-96 overflow-y-auto">
+              <h3 className="text-lg font-semibold mb-4">
+                {editingExpense ? 'Editar Gasto' : 'Detalles del Gasto'}
+              </h3>
+              
+              {editingExpense ? (
+                /* Modo Edición */
+                <form onSubmit={updateExpense}>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Descripción
+                      </label>
+                      <input
+                        type="text"
+                        value={editingExpense.description}
+                        onChange={(e) => setEditingExpense({...editingExpense, description: e.target.value})}
+                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="Ej: Cena, Transporte, etc."
+                        required
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Monto
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={editingExpense.amount}
+                        onChange={(e) => setEditingExpense({...editingExpense, amount: e.target.value})}
+                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="0.00"
+                        required
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Pagado por
+                      </label>
+                      <select
+                        value={editingExpense.paidBy}
+                        onChange={(e) => setEditingExpense({...editingExpense, paidBy: e.target.value})}
+                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                      >
+                        {members.map(member => (
+                          <option key={member.id} value={member.id}>
+                            {member.displayName || 'Usuario'}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Dividir entre
+                      </label>
+                      <div className="space-y-3">
+                        {members.map(member => (
+                          <div key={member.id} className="flex items-center justify-between">
+                            <label className="flex items-center">
+                              <input
+                                type="checkbox"
+                                checked={editingExpense.splitBetween.includes(member.id)}
+                                onChange={(e) => {
+                                  const updated = e.target.checked
+                                    ? [...editingExpense.splitBetween, member.id]
+                                    : editingExpense.splitBetween.filter(id => id !== member.id);
+                                  setEditingExpense({...editingExpense, splitBetween: updated});
+                                  
+                                  // Limpiar participaciones si se deselecciona
+                                  if (!e.target.checked) {
+                                    const newMemberShares = { ...editingExpense.memberShares };
+                                    delete newMemberShares[member.id];
+                                    setEditingExpense({...editingExpense, memberShares: newMemberShares});
+                                  }
+                                }}
+                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="ml-2 text-sm text-gray-700">
+                                {member.displayName || 'Usuario'}
+                              </span>
+                            </label>
+                            
+                            {editingExpense.splitBetween.includes(member.id) && (
+                              <div className="flex items-center space-x-2">
+                                <span className="text-xs text-gray-500">Participaciones:</span>
+                                <select
+                                  value={editingExpense.memberShares[member.id] || 1}
+                                  onChange={(e) => {
+                                    const shares = parseInt(e.target.value);
+                                    setEditingExpense({
+                                      ...editingExpense,
+                                      memberShares: {
+                                        ...editingExpense.memberShares,
+                                        [member.id]: shares
+                                      }
+                                    });
+                                  }}
+                                  className="text-xs border border-gray-300 rounded px-2 py-1"
+                                >
+                                  <option value={1}>1x</option>
+                                  <option value={2}>2x</option>
+                                  <option value={3}>3x</option>
+                                  <option value={4}>4x</option>
+                                  <option value={5}>5x</option>
+                                  <option value={6}>6x</option>
+                                </select>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex space-x-3 mt-6">
+                    <button
+                      type="submit"
+                      className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700"
+                    >
+                      Actualizar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={closeExpenseModal}
+                      className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                /* Modo Solo Lectura */
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">Descripción</p>
+                    <p className="text-lg text-gray-900">{selectedExpense.description}</p>
+                  </div>
+                  
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">Monto Total</p>
+                    <p className="text-2xl font-semibold text-green-600">${selectedExpense.amount.toFixed(2)}</p>
+                  </div>
+                  
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">Pagado por</p>
+                    <p className="text-gray-900">
+                      {members.find(m => m.id === selectedExpense.paidBy)?.displayName || 'Usuario'}
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">Dividido entre</p>
+                    <div className="space-y-2">
+                      {selectedExpense.splitBetween.map(memberId => {
+                        const member = members.find(m => m.id === memberId);
+                        const shares = selectedExpense.memberShares?.[memberId] || 1;
+                        const amountPerShare = selectedExpense.amount / selectedExpense.totalShares;
+                        const personalAmount = amountPerShare * shares;
+                        
+                        return (
+                          <div key={memberId} className="flex justify-between items-center bg-gray-50 p-2 rounded">
+                            <span className="text-sm text-gray-900">
+                              {member?.displayName || 'Usuario'}
+                              {shares > 1 && <span className="text-xs text-gray-500 ml-1">({shares}x)</span>}
+                            </span>
+                            <span className="text-sm font-medium text-gray-900">
+                              ${personalAmount.toFixed(2)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  
+                  <div className="border-t pt-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium text-gray-700">Creado por</span>
+                      <span className="text-sm text-gray-900">
+                        {members.find(m => m.id === selectedExpense.createdBy)?.displayName || 'Usuario'}
+                      </span>
+                    </div>
+                    {selectedExpense.createdAt && (
+                      <div className="flex justify-between items-center mt-2">
+                        <span className="text-sm font-medium text-gray-700">Fecha</span>
+                        <span className="text-sm text-gray-900">
+                          {selectedExpense.createdAt.toDate().toLocaleDateString()}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="flex space-x-3 mt-6">
+                    {selectedExpense.createdBy === currentUser.uid && (
+                      <button
+                        onClick={() => {
+                          setEditingExpense({
+                            description: selectedExpense.description,
+                            amount: selectedExpense.amount.toString(),
+                            paidBy: selectedExpense.paidBy,
+                            splitBetween: [...selectedExpense.splitBetween],
+                            memberShares: { ...selectedExpense.memberShares }
+                          });
+                        }}
+                        className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700"
+                      >
+                        Editar
+                      </button>
+                    )}
+                    <button
+                      onClick={closeExpenseModal}
+                      className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400"
+                    >
+                      Cerrar
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

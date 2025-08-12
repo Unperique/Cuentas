@@ -10,7 +10,10 @@ import {
   Check,
   Settings,
   Home,
-  Trash2
+  Trash2,
+  User,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { 
   collection, 
@@ -21,8 +24,15 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  updateDoc,
   serverTimestamp 
 } from 'firebase/firestore';
+import { 
+  updateProfile, 
+  updatePassword, 
+  EmailAuthProvider, 
+  reauthenticateWithCredential 
+} from 'firebase/auth';
 import { db } from '../firebase';
 import toast from 'react-hot-toast';
 
@@ -33,6 +43,19 @@ export default function Dashboard() {
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [roomName, setRoomName] = useState('');
   const [copiedCode, setCopiedCode] = useState(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileData, setProfileData] = useState({
+    displayName: '',
+    email: '',
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [showPasswords, setShowPasswords] = useState({
+    current: false,
+    new: false,
+    confirm: false
+  });
 
   useEffect(() => {
     if (!currentUser) return;
@@ -129,6 +152,94 @@ export default function Dashboard() {
     }
   }
 
+  function openProfileModal() {
+    setProfileData({
+      displayName: currentUser?.displayName || '',
+      email: currentUser?.email || '',
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: ''
+    });
+    setShowProfileModal(true);
+  }
+
+  function closeProfileModal() {
+    setShowProfileModal(false);
+    setProfileData({
+      displayName: '',
+      email: '',
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: ''
+    });
+    setShowPasswords({
+      current: false,
+      new: false,
+      confirm: false
+    });
+  }
+
+  async function updateUserProfile(e) {
+    e.preventDefault();
+    
+    try {
+      // Actualizar nombre si cambió
+      if (profileData.displayName !== currentUser.displayName) {
+        await updateProfile(currentUser, {
+          displayName: profileData.displayName
+        });
+        
+        // También actualizar en Firestore
+        await updateDoc(doc(db, 'users', currentUser.uid), {
+          displayName: profileData.displayName
+        });
+      }
+
+      // Cambiar contraseña si se proporcionó
+      if (profileData.newPassword) {
+        if (profileData.newPassword !== profileData.confirmPassword) {
+          toast.error('Las contraseñas nuevas no coinciden');
+          return;
+        }
+        
+        if (profileData.newPassword.length < 6) {
+          toast.error('La contraseña debe tener al menos 6 caracteres');
+          return;
+        }
+
+        if (!profileData.currentPassword) {
+          toast.error('Debes ingresar tu contraseña actual para cambiarla');
+          return;
+        }
+
+        // Reautenticar usuario
+        const credential = EmailAuthProvider.credential(
+          currentUser.email,
+          profileData.currentPassword
+        );
+        
+        await reauthenticateWithCredential(currentUser, credential);
+        await updatePassword(currentUser, profileData.newPassword);
+        
+        toast.success('Contraseña actualizada exitosamente');
+      }
+
+      closeProfileModal();
+      if (profileData.displayName !== currentUser.displayName) {
+        toast.success('Perfil actualizado exitosamente');
+      }
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      if (error.code === 'auth/wrong-password') {
+        toast.error('La contraseña actual es incorrecta');
+      } else if (error.code === 'auth/weak-password') {
+        toast.error('La contraseña es muy débil');
+      } else {
+        toast.error('Error al actualizar el perfil');
+      }
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -146,6 +257,13 @@ export default function Dashboard() {
               <span className="text-sm text-gray-600">
                 Hola, {currentUser?.displayName || 'Usuario'}
               </span>
+              <button
+                onClick={openProfileModal}
+                className="flex items-center space-x-2 text-gray-600 hover:text-gray-900"
+              >
+                <User className="h-5 w-5" />
+                <span>Mi Perfil</span>
+              </button>
               <button
                 onClick={handleLogout}
                 className="flex items-center space-x-2 text-gray-600 hover:text-gray-900"
@@ -239,6 +357,134 @@ export default function Dashboard() {
                   <button
                     type="button"
                     onClick={() => setShowCreateRoom(false)}
+                    className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Profile Modal */}
+        {showProfileModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-96 overflow-y-auto">
+              <h3 className="text-lg font-semibold mb-4">Mi Perfil</h3>
+              <form onSubmit={updateUserProfile}>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Nombre
+                    </label>
+                    <input
+                      type="text"
+                      value={profileData.displayName}
+                      onChange={(e) => setProfileData({...profileData, displayName: e.target.value})}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Tu nombre"
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Email
+                    </label>
+                    <input
+                      type="email"
+                      value={profileData.email}
+                      className="w-full p-3 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
+                      disabled
+                    />
+                    <p className="text-xs text-gray-500 mt-1">El email no se puede cambiar</p>
+                  </div>
+                  
+                  <div className="border-t pt-4">
+                    <h4 className="text-md font-medium text-gray-900 mb-3">Cambiar Contraseña</h4>
+                    <p className="text-xs text-gray-500 mb-3">Deja en blanco si no quieres cambiar tu contraseña</p>
+                    
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Contraseña Actual
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showPasswords.current ? "text" : "password"}
+                            value={profileData.currentPassword}
+                            onChange={(e) => setProfileData({...profileData, currentPassword: e.target.value})}
+                            className="w-full p-3 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="Contraseña actual"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPasswords({...showPasswords, current: !showPasswords.current})}
+                            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                          >
+                            {showPasswords.current ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Nueva Contraseña
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showPasswords.new ? "text" : "password"}
+                            value={profileData.newPassword}
+                            onChange={(e) => setProfileData({...profileData, newPassword: e.target.value})}
+                            className="w-full p-3 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="Nueva contraseña (mínimo 6 caracteres)"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPasswords({...showPasswords, new: !showPasswords.new})}
+                            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                          >
+                            {showPasswords.new ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Confirmar Nueva Contraseña
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showPasswords.confirm ? "text" : "password"}
+                            value={profileData.confirmPassword}
+                            onChange={(e) => setProfileData({...profileData, confirmPassword: e.target.value})}
+                            className="w-full p-3 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="Confirmar nueva contraseña"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPasswords({...showPasswords, confirm: !showPasswords.confirm})}
+                            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                          >
+                            {showPasswords.confirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex space-x-3 mt-6">
+                  <button
+                    type="submit"
+                    className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700"
+                  >
+                    Guardar Cambios
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeProfileModal}
                     className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400"
                   >
                     Cancelar
