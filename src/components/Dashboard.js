@@ -17,7 +17,17 @@ import {
   Wallet,
   TrendingUp,
   TrendingDown,
-  Calendar
+  Calendar,
+  CreditCard,
+  Banknote,
+  Gift,
+  Edit3,
+  Target,
+  PiggyBank,
+  AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
+  Loader2
 } from 'lucide-react';
 import { 
   collection, 
@@ -50,6 +60,22 @@ function formatCurrency(amount) {
   }).format(amount);
 }
 
+// Función para obtener fecha local en formato YYYY-MM-DD
+function getLocalDateString(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// Función para formatear fecha correctamente evitando desfase de zona horaria
+function formatDateString(dateString) {
+  if (!dateString) return '';
+  const [year, month, day] = dateString.split('-');
+  const date = new Date(year, month - 1, day); // month - 1 porque JavaScript usa 0-based months
+  return date.toLocaleDateString('es-CO');
+}
+
 export default function Dashboard() {
   const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
@@ -77,9 +103,29 @@ export default function Dashboard() {
     description: '',
     amount: '',
     category: '',
-    date: new Date().toISOString().split('T')[0]
+    date: getLocalDateString(),
+    paymentMethod: 'efectivo', // 'efectivo', 'tarjeta', 'puntos'
+    balance: 'principal' // balance seleccionado
   });
   const [activeTab, setActiveTab] = useState('personal'); // 'personal' or 'group'
+  const [editingTransaction, setEditingTransaction] = useState(null);
+  const [balances, setBalances] = useState([]);
+  const [showBalanceModal, setShowBalanceModal] = useState(false);
+  const [balanceData, setBalanceData] = useState({
+    name: '',
+    type: 'savings', // 'savings', 'debt', 'general'
+    description: '',
+    goal: ''
+  });
+  
+  // Estados para paginación
+  const [currentPage, setCurrentPage] = useState(1);
+  const transactionsPerPage = 8;
+  
+  // Estados para loading
+  const [isLoadingTransaction, setIsLoadingTransaction] = useState(false);
+  const [isLoadingBalance, setIsLoadingBalance] = useState(false);
+  const [isLoadingRoom, setIsLoadingRoom] = useState(false);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -89,12 +135,42 @@ export default function Dashboard() {
       where('members', 'array-contains', currentUser.uid)
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
       const roomsData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
-      setRooms(roomsData);
+
+      // Calcular el total de gastos para cada sala
+      const roomsWithExpenses = await Promise.all(
+        roomsData.map(async (room) => {
+          try {
+            const expensesQuery = query(
+              collection(db, 'expenses'),
+              where('roomId', '==', room.id)
+            );
+            const expensesSnapshot = await getDocs(expensesQuery);
+            const expenses = expensesSnapshot.docs.map(doc => doc.data());
+            
+            const totalExpenses = expenses.reduce((total, expense) => {
+              return total + (parseFloat(expense.amount) || 0);
+            }, 0);
+
+            return {
+              ...room,
+              totalExpenses
+            };
+          } catch (error) {
+            console.error('Error calculating expenses for room:', room.id, error);
+            return {
+              ...room,
+              totalExpenses: 0
+            };
+          }
+        })
+      );
+
+      setRooms(roomsWithExpenses);
     });
 
     return () => unsubscribe();
@@ -121,6 +197,26 @@ export default function Dashboard() {
         return dateB.localeCompare(dateA);
       });
       setPersonalTransactions(transactionsData);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    // Escuchar cambios en balances/bolsillos
+    const balancesQuery = query(
+      collection(db, 'balances'),
+      where('userId', '==', currentUser.uid)
+    );
+
+    const unsubscribe = onSnapshot(balancesQuery, (snapshot) => {
+      const balancesData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setBalances(balancesData);
     });
 
     return () => unsubscribe();
@@ -290,50 +386,88 @@ export default function Dashboard() {
     }
   }
 
-  function openTransactionModal(type = 'income') {
-    setTransactionData({
-      type,
-      description: '',
-      amount: '',
-      category: '',
-      date: new Date().toISOString().split('T')[0]
-    });
+  function openTransactionModal(type = 'income', transaction = null) {
+    if (transaction) {
+      // Modo edición
+      setEditingTransaction(transaction);
+      setTransactionData({
+        type: transaction.type,
+        description: transaction.description,
+        amount: transaction.amount.toString(),
+        category: transaction.category,
+        date: transaction.date,
+        paymentMethod: transaction.paymentMethod || 'efectivo',
+        balance: transaction.balance || 'principal'
+      });
+    } else {
+      // Modo creación
+      setEditingTransaction(null);
+      setTransactionData({
+        type,
+        description: '',
+        amount: '',
+        category: '',
+        date: getLocalDateString(),
+        paymentMethod: 'efectivo',
+        balance: 'principal'
+      });
+    }
     setShowTransactionModal(true);
   }
 
   function closeTransactionModal() {
     setShowTransactionModal(false);
+    setEditingTransaction(null);
     setTransactionData({
       type: 'income',
       description: '',
       amount: '',
       category: '',
-      date: new Date().toISOString().split('T')[0]
+      date: getLocalDateString(),
+      paymentMethod: 'efectivo',
+      balance: 'principal'
     });
   }
 
   async function addTransaction(e) {
     e.preventDefault();
+    if (isLoadingTransaction) return; // Prevenir múltiples clicks
+    
     if (!transactionData.description || !transactionData.amount || !transactionData.category) {
       toast.error('Por favor completa todos los campos');
       return;
     }
 
+    setIsLoadingTransaction(true);
     try {
-      await addDoc(collection(db, 'personalTransactions'), {
+      const transactionObj = {
         userId: currentUser.uid,
         type: transactionData.type,
         description: transactionData.description,
         amount: parseFloat(transactionData.amount),
         category: transactionData.category,
         date: transactionData.date,
-        createdAt: serverTimestamp()
-      });
+        paymentMethod: transactionData.paymentMethod,
+        balance: transactionData.balance,
+        updatedAt: serverTimestamp()
+      };
+
+      if (editingTransaction) {
+        // Actualizar transacción existente
+        await updateDoc(doc(db, 'personalTransactions', editingTransaction.id), transactionObj);
+        toast.success('Transacción actualizada exitosamente');
+      } else {
+        // Crear nueva transacción
+        transactionObj.createdAt = serverTimestamp();
+        await addDoc(collection(db, 'personalTransactions'), transactionObj);
+        toast.success(`${transactionData.type === 'income' ? 'Ingreso' : 'Egreso'} agregado exitosamente`);
+      }
 
       closeTransactionModal();
-      toast.success(`${transactionData.type === 'income' ? 'Ingreso' : 'Egreso'} agregado exitosamente`);
     } catch (error) {
-      toast.error('Error al agregar la transacción');
+      toast.error(editingTransaction ? 'Error al actualizar la transacción' : 'Error al agregar la transacción');
+    } finally {
+      setIsLoadingTransaction(false);
     }
   }
 
@@ -358,6 +492,127 @@ export default function Dashboard() {
     .reduce((sum, t) => sum + (t.amount || 0), 0);
   
   const balance = totalIncome - totalExpenses;
+
+  // Calcular totales por método de pago (solo egresos)
+  const paymentMethodTotals = personalTransactions
+    .filter(t => t.type === 'expense')
+    .reduce((totals, t) => {
+      const method = t.paymentMethod || 'efectivo';
+      totals[method] = (totals[method] || 0) + (t.amount || 0);
+      return totals;
+    }, {});
+
+  // Lógica de paginación
+  const totalPages = Math.ceil(personalTransactions.length / transactionsPerPage);
+  const startIndex = (currentPage - 1) * transactionsPerPage;
+  const endIndex = startIndex + transactionsPerPage;
+  const currentTransactions = personalTransactions.slice(startIndex, endIndex);
+
+  const goToPage = (page) => {
+    setCurrentPage(page);
+  };
+
+  const goToPreviousPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+    }
+  };
+
+  const goToNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+    }
+  };
+
+  // Funciones para manejar balances/bolsillos
+  function openBalanceModal() {
+    setBalanceData({
+      name: '',
+      type: 'savings',
+      description: '',
+      goal: ''
+    });
+    setShowBalanceModal(true);
+  }
+
+  function closeBalanceModal() {
+    setShowBalanceModal(false);
+    setBalanceData({
+      name: '',
+      type: 'savings',
+      description: '',
+      goal: ''
+    });
+  }
+
+  async function addBalance(e) {
+    e.preventDefault();
+    if (isLoadingBalance) return; // Prevenir múltiples clicks
+    
+    if (!balanceData.name || !balanceData.description) {
+      toast.error('Por favor completa todos los campos obligatorios');
+      return;
+    }
+
+    setIsLoadingBalance(true);
+    try {
+      await addDoc(collection(db, 'balances'), {
+        userId: currentUser.uid,
+        name: balanceData.name,
+        type: balanceData.type,
+        description: balanceData.description,
+        goal: balanceData.goal ? parseFloat(balanceData.goal) : null,
+        currentAmount: 0,
+        createdAt: serverTimestamp()
+      });
+
+      closeBalanceModal();
+      toast.success('Balance creado exitosamente');
+    } catch (error) {
+      toast.error('Error al crear el balance');
+    } finally {
+      setIsLoadingBalance(false);
+    }
+  }
+
+  async function deleteBalance(balanceId) {
+    if (!window.confirm('¿Estás seguro de que quieres eliminar este balance?')) return;
+
+    try {
+      await deleteDoc(doc(db, 'balances', balanceId));
+      toast.success('Balance eliminado');
+    } catch (error) {
+      toast.error('Error al eliminar el balance');
+    }
+  }
+
+  // Función para obtener el ícono del método de pago
+  function getPaymentMethodIcon(method) {
+    switch (method) {
+      case 'tarjeta':
+        return <CreditCard className="h-4 w-4" />;
+      case 'efectivo':
+        return <Banknote className="h-4 w-4" />;
+      case 'puntos':
+        return <Gift className="h-4 w-4" />;
+      default:
+        return <Banknote className="h-4 w-4" />;
+    }
+  }
+
+  // Función para obtener el ícono del tipo de balance
+  function getBalanceTypeIcon(type) {
+    switch (type) {
+      case 'savings':
+        return <PiggyBank className="h-5 w-5" />;
+      case 'debt':
+        return <AlertTriangle className="h-5 w-5" />;
+      case 'general':
+        return <Wallet className="h-5 w-5" />;
+      default:
+        return <Wallet className="h-5 w-5" />;
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -471,27 +726,176 @@ export default function Dashboard() {
               </div>
             </div>
 
+            {/* Estadísticas por Método de Pago */}
+            {Object.keys(paymentMethodTotals).length > 0 && (
+              <div className="mb-8">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                  <CreditCard className="h-5 w-5 mr-2" />
+                  Egresos por Método de Pago
+                </h3>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {paymentMethodTotals.efectivo > 0 && (
+                    <div className="bg-gradient-to-r from-green-50 to-green-100 rounded-lg shadow p-6 border border-green-200">
+                      <div className="flex items-center">
+                        <Banknote className="h-8 w-8 text-green-600" />
+                        <div className="ml-4">
+                          <p className="text-sm font-medium text-green-700">Efectivo</p>
+                          <p className="text-2xl font-semibold text-green-800">
+                            {formatCurrency(paymentMethodTotals.efectivo)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {paymentMethodTotals.tarjeta > 0 && (
+                    <div className="bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg shadow p-6 border border-blue-200">
+                      <div className="flex items-center">
+                        <CreditCard className="h-8 w-8 text-blue-600" />
+                        <div className="ml-4">
+                          <p className="text-sm font-medium text-blue-700">Tarjeta</p>
+                          <p className="text-2xl font-semibold text-blue-800">
+                            {formatCurrency(paymentMethodTotals.tarjeta)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {paymentMethodTotals.puntos > 0 && (
+                    <div className="bg-gradient-to-r from-purple-50 to-purple-100 rounded-lg shadow p-6 border border-purple-200">
+                      <div className="flex items-center">
+                        <Gift className="h-8 w-8 text-purple-600" />
+                        <div className="ml-4">
+                          <p className="text-sm font-medium text-purple-700">Puntos</p>
+                          <p className="text-2xl font-semibold text-purple-800">
+                            {formatCurrency(paymentMethodTotals.puntos)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Acciones Personales */}
             <div className="mb-8">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Acciones Rápidas</h3>
               <div className="flex flex-wrap gap-4">
                 <button
                   onClick={() => openTransactionModal('income')}
-                  className="flex items-center space-x-2 bg-emerald-600 text-white px-6 py-3 rounded-lg hover:bg-emerald-700 transition-colors"
+                  disabled={isLoadingTransaction}
+                  className={`flex items-center space-x-2 px-6 py-3 rounded-lg transition-colors ${
+                    isLoadingTransaction 
+                      ? 'bg-emerald-400 cursor-not-allowed' 
+                      : 'bg-emerald-600 hover:bg-emerald-700'
+                  } text-white`}
                 >
-                  <TrendingUp className="h-5 w-5" />
-                  <span>Agregar Ingreso</span>
+                  {isLoadingTransaction ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <TrendingUp className="h-5 w-5" />
+                  )}
+                  <span>{isLoadingTransaction ? 'Procesando...' : 'Agregar Ingreso'}</span>
                 </button>
                 
                 <button
                   onClick={() => openTransactionModal('expense')}
-                  className="flex items-center space-x-2 bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 transition-colors"
+                  disabled={isLoadingTransaction}
+                  className={`flex items-center space-x-2 px-6 py-3 rounded-lg transition-colors ${
+                    isLoadingTransaction 
+                      ? 'bg-red-400 cursor-not-allowed' 
+                      : 'bg-red-600 hover:bg-red-700'
+                  } text-white`}
                 >
-                  <TrendingDown className="h-5 w-5" />
-                  <span>Agregar Egreso</span>
+                  {isLoadingTransaction ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <TrendingDown className="h-5 w-5" />
+                  )}
+                  <span>{isLoadingTransaction ? 'Procesando...' : 'Agregar Egreso'}</span>
+                </button>
+
+                <button
+                  onClick={openBalanceModal}
+                  disabled={isLoadingBalance}
+                  className={`flex items-center space-x-2 px-6 py-3 rounded-lg transition-colors ${
+                    isLoadingBalance 
+                      ? 'bg-purple-400 cursor-not-allowed' 
+                      : 'bg-purple-600 hover:bg-purple-700'
+                  } text-white`}
+                >
+                  {isLoadingBalance ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <PiggyBank className="h-5 w-5" />
+                  )}
+                  <span>{isLoadingBalance ? 'Creando...' : 'Crear Balance'}</span>
                 </button>
               </div>
             </div>
+
+            {/* Balances/Bolsillos */}
+            {balances.length > 0 && (
+              <div className="mb-8">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                  <Target className="h-5 w-5 mr-2" />
+                  Mis Balances
+                </h3>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {balances.map((balance) => (
+                    <div key={balance.id} className={`p-4 rounded-lg border-2 ${
+                      balance.type === 'savings' ? 'bg-green-50 border-green-200' :
+                      balance.type === 'debt' ? 'bg-red-50 border-red-200' :
+                      'bg-blue-50 border-blue-200'
+                    }`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center space-x-2">
+                          {getBalanceTypeIcon(balance.type)}
+                          <h4 className="font-semibold text-gray-900">{balance.name}</h4>
+                        </div>
+                        <button
+                          onClick={() => deleteBalance(balance.id)}
+                          className="text-red-600 hover:text-red-800"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <p className="text-sm text-gray-600 mb-2">{balance.description}</p>
+                      <div className="flex justify-between items-center">
+                        <span className="text-lg font-bold text-gray-900">
+                          {formatCurrency(balance.currentAmount || 0)}
+                        </span>
+                        {balance.goal && (
+                          <span className="text-sm text-gray-500">
+                            Meta: {formatCurrency(balance.goal)}
+                          </span>
+                        )}
+                      </div>
+                      {balance.goal && (
+                        <div className="mt-2">
+                          <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div 
+                              className={`h-2 rounded-full ${
+                                balance.type === 'savings' ? 'bg-green-500' :
+                                balance.type === 'debt' ? 'bg-red-500' :
+                                'bg-blue-500'
+                              }`}
+                              style={{ 
+                                width: `${Math.min(100, ((balance.currentAmount || 0) / balance.goal) * 100)}%` 
+                              }}
+                            ></div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Transacciones Recientes */}
             {personalTransactions.length > 0 && (
@@ -504,7 +908,7 @@ export default function Dashboard() {
                 <div className="bg-white rounded-lg shadow border">
                   <div className="p-6">
                     <div className="grid gap-4">
-                      {personalTransactions.slice(0, 5).map((transaction) => (
+                      {currentTransactions.map((transaction) => (
                         <div key={transaction.id} className={`p-4 rounded-lg border-l-4 ${
                           transaction.type === 'income' 
                             ? 'bg-green-50 border-l-green-500' 
@@ -523,7 +927,7 @@ export default function Dashboard() {
                               </div>
                               <div>
                                 <p className="font-semibold text-gray-900">{transaction.description}</p>
-                                <p className="text-sm text-gray-600">
+                                <div className="flex items-center space-x-2 text-sm text-gray-600">
                                   <span className={`inline-block px-2 py-1 rounded-full text-xs ${
                                     transaction.type === 'income' 
                                       ? 'bg-green-100 text-green-800' 
@@ -531,19 +935,38 @@ export default function Dashboard() {
                                   }`}>
                                     {transaction.category}
                                   </span>
-                                  <span className="ml-2">{new Date(transaction.date).toLocaleDateString('es-CO')}</span>
-                                </p>
+                                  {transaction.paymentMethod && (
+                                    <span className="flex items-center space-x-1 bg-gray-100 px-2 py-1 rounded-full text-xs">
+                                      {getPaymentMethodIcon(transaction.paymentMethod)}
+                                      <span className="capitalize">{transaction.paymentMethod}</span>
+                                    </span>
+                                  )}
+                                  <span>{formatDateString(transaction.date)}</span>
+                                </div>
+                                {transaction.balance && transaction.balance !== 'principal' && (
+                                  <p className="text-xs text-purple-600 mt-1">
+                                    Balance: {balances.find(b => b.id === transaction.balance)?.name || transaction.balance}
+                                  </p>
+                                )}
                               </div>
                             </div>
-                            <div className="flex items-center space-x-3">
+                            <div className="flex items-center space-x-2">
                               <span className={`font-bold text-lg ${
                                 transaction.type === 'income' ? 'text-green-600' : 'text-red-600'
                               }`}>
                                 {transaction.type === 'income' ? '+' : '-'}{formatCurrency(transaction.amount)}
                               </span>
                               <button
+                                onClick={() => openTransactionModal(transaction.type, transaction)}
+                                className="text-blue-600 hover:text-blue-800 p-1 rounded hover:bg-blue-100 transition-colors"
+                                title="Editar transacción"
+                              >
+                                <Edit3 className="h-4 w-4" />
+                              </button>
+                              <button
                                 onClick={() => deleteTransaction(transaction.id)}
                                 className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-100 transition-colors"
+                                title="Eliminar transacción"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </button>
@@ -552,13 +975,59 @@ export default function Dashboard() {
                         </div>
                       ))}
                     </div>
-                    {personalTransactions.length > 5 && (
-                      <div className="mt-6 text-center">
-                        <div className="inline-flex items-center px-4 py-2 bg-gray-100 rounded-lg">
-                          <Calendar className="h-4 w-4 text-gray-500 mr-2" />
-                          <span className="text-sm text-gray-600 font-medium">
-                            Mostrando 5 de {personalTransactions.length} transacciones
-                          </span>
+                    {personalTransactions.length > transactionsPerPage && (
+                      <div className="mt-6 border-t pt-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center">
+                            <Calendar className="h-4 w-4 text-gray-500 mr-2" />
+                            <span className="text-sm text-gray-600 font-medium">
+                              Mostrando {startIndex + 1} - {Math.min(endIndex, personalTransactions.length)} de {personalTransactions.length} transacciones
+                            </span>
+                          </div>
+                          
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={goToPreviousPage}
+                              disabled={currentPage === 1}
+                              className={`flex items-center px-3 py-2 rounded-lg border transition-colors ${
+                                currentPage === 1 
+                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                                  : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-300'
+                              }`}
+                            >
+                              <ChevronLeft className="h-4 w-4 mr-1" />
+                              Anterior
+                            </button>
+                            
+                            <div className="flex items-center space-x-1">
+                              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                                <button
+                                  key={page}
+                                  onClick={() => goToPage(page)}
+                                  className={`px-3 py-2 rounded-lg transition-colors ${
+                                    currentPage === page
+                                      ? 'bg-blue-600 text-white'
+                                      : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                                  }`}
+                                >
+                                  {page}
+                                </button>
+                              ))}
+                            </div>
+                            
+                            <button
+                              onClick={goToNextPage}
+                              disabled={currentPage === totalPages}
+                              className={`flex items-center px-3 py-2 rounded-lg border transition-colors ${
+                                currentPage === totalPages 
+                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                                  : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-300'
+                              }`}
+                            >
+                              Siguiente
+                              <ChevronRight className="h-4 w-4 ml-1" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -868,7 +1337,10 @@ export default function Dashboard() {
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-lg p-6 w-full max-w-md">
               <h3 className="text-lg font-semibold mb-4">
-                {transactionData.type === 'income' ? 'Agregar Ingreso' : 'Agregar Egreso'}
+                {editingTransaction 
+                  ? `Editar ${transactionData.type === 'income' ? 'Ingreso' : 'Egreso'}`
+                  : `Agregar ${transactionData.type === 'income' ? 'Ingreso' : 'Egreso'}`
+                }
               </h3>
               <form onSubmit={addTransaction}>
                 <div className="space-y-4">
@@ -961,18 +1433,64 @@ export default function Dashboard() {
                       required
                     />
                   </div>
+
+                  {transactionData.type === 'expense' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Método de Pago
+                      </label>
+                      <select
+                        value={transactionData.paymentMethod}
+                        onChange={(e) => setTransactionData({...transactionData, paymentMethod: e.target.value})}
+                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      >
+                        <option value="efectivo">💵 Efectivo</option>
+                        <option value="tarjeta">💳 Tarjeta</option>
+                        <option value="puntos">🎁 Puntos</option>
+                      </select>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Balance
+                    </label>
+                    <select
+                      value={transactionData.balance}
+                      onChange={(e) => setTransactionData({...transactionData, balance: e.target.value})}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="principal">💼 Balance Principal</option>
+                      {balances.map(balance => (
+                        <option key={balance.id} value={balance.id}>
+                          {balance.type === 'savings' ? '🐷' : balance.type === 'debt' ? '⚠️' : '💰'} {balance.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 
                 <div className="flex space-x-3 mt-6">
                   <button
                     type="submit"
-                    className={`flex-1 text-white py-2 px-4 rounded-lg transition-colors ${
-                      transactionData.type === 'income' 
-                        ? 'bg-emerald-600 hover:bg-emerald-700' 
-                        : 'bg-red-600 hover:bg-red-700'
+                    disabled={isLoadingTransaction}
+                    className={`flex-1 flex items-center justify-center space-x-2 text-white py-2 px-4 rounded-lg transition-colors ${
+                      isLoadingTransaction 
+                        ? (transactionData.type === 'income' ? 'bg-emerald-400' : 'bg-red-400') + ' cursor-not-allowed'
+                        : transactionData.type === 'income' 
+                          ? 'bg-emerald-600 hover:bg-emerald-700' 
+                          : 'bg-red-600 hover:bg-red-700'
                     }`}
                   >
-                    Agregar {transactionData.type === 'income' ? 'Ingreso' : 'Egreso'}
+                    {isLoadingTransaction && <Loader2 className="h-4 w-4 animate-spin" />}
+                    <span>
+                      {isLoadingTransaction 
+                        ? (editingTransaction ? 'Actualizando...' : 'Agregando...')
+                        : editingTransaction 
+                          ? `Actualizar ${transactionData.type === 'income' ? 'Ingreso' : 'Egreso'}`
+                          : `Agregar ${transactionData.type === 'income' ? 'Ingreso' : 'Egreso'}`
+                      }
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -987,6 +1505,101 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Balance Modal */}
+        {showBalanceModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md">
+              <h3 className="text-lg font-semibold mb-4">Crear Nuevo Balance</h3>
+              <form onSubmit={addBalance}>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Nombre del Balance
+                    </label>
+                    <input
+                      type="text"
+                      value={balanceData.name}
+                      onChange={(e) => setBalanceData({...balanceData, name: e.target.value})}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Ej: Vacaciones, Emergencias, etc."
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Tipo de Balance
+                    </label>
+                    <select
+                      value={balanceData.type}
+                      onChange={(e) => setBalanceData({...balanceData, type: e.target.value})}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="savings">🐷 Ahorro</option>
+                      <option value="debt">⚠️ Deuda</option>
+                      <option value="general">💰 General</option>
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Descripción
+                    </label>
+                    <textarea
+                      value={balanceData.description}
+                      onChange={(e) => setBalanceData({...balanceData, description: e.target.value})}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Describe el propósito de este balance..."
+                      rows="3"
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Meta (Opcional)
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      value={balanceData.goal}
+                      onChange={(e) => setBalanceData({...balanceData, goal: e.target.value})}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="0"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      {balanceData.type === 'savings' ? 'Cantidad que quieres ahorrar' :
+                       balanceData.type === 'debt' ? 'Cantidad de la deuda total' :
+                       'Meta financiera para este balance'}
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="flex space-x-3 mt-6">
+                  <button
+                    type="submit"
+                    disabled={isLoadingBalance}
+                    className={`flex-1 flex items-center justify-center space-x-2 text-white py-2 px-4 rounded-lg transition-colors ${
+                      isLoadingBalance 
+                        ? 'bg-purple-400 cursor-not-allowed' 
+                        : 'bg-purple-600 hover:bg-purple-700'
+                    }`}
+                  >
+                    {isLoadingBalance && <Loader2 className="h-4 w-4 animate-spin" />}
+                    <span>{isLoadingBalance ? 'Creando...' : 'Crear Balance'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeBalanceModal}
+                    className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>

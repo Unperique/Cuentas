@@ -10,7 +10,8 @@ import {
   Trash2,
   Copy,
   Check,
-  AlertCircle
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 import { 
   doc, 
@@ -63,6 +64,8 @@ export default function Room() {
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [selectedExpense, setSelectedExpense] = useState(null);
   const [editingExpense, setEditingExpense] = useState(null);
+  const [isLoadingExpense, setIsLoadingExpense] = useState(false);
+  const [isLoadingMember, setIsLoadingMember] = useState(false);
 
   useEffect(() => {
     if (!roomId || !currentUser) return;
@@ -128,11 +131,14 @@ export default function Room() {
 
   async function addExpense(e) {
     e.preventDefault();
+    if (isLoadingExpense) return; // Prevenir múltiples clicks
+    
     if (!newExpense.description || !newExpense.amount || newExpense.splitBetween.length === 0) {
       toast.error('Por favor completa todos los campos');
       return;
     }
 
+    setIsLoadingExpense(true);
     try {
       const amount = parseFloat(newExpense.amount);
       
@@ -167,6 +173,8 @@ export default function Room() {
       toast.success('Gasto agregado exitosamente');
     } catch (error) {
       toast.error('Error al agregar el gasto');
+    } finally {
+      setIsLoadingExpense(false);
     }
   }
 
@@ -437,7 +445,7 @@ export default function Room() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center">
               <DollarSign className="h-8 w-8 text-green-600" />
@@ -469,18 +477,7 @@ export default function Room() {
               </div>
             </div>
           </div>
-          
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="flex items-center">
-              <User className="h-8 w-8 text-purple-600" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Promedio</p>
-                <p className="text-2xl font-semibold text-gray-900">
-                  {formatCurrency(members.length > 0 ? (totalExpenses / members.length) : 0)}
-                </p>
-              </div>
-            </div>
-          </div>
+
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -492,10 +489,19 @@ export default function Room() {
                   <h2 className="text-lg font-semibold text-gray-900">Gastos</h2>
                   <button
                     onClick={() => setShowAddExpense(true)}
-                    className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                    disabled={isLoadingExpense}
+                    className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
+                      isLoadingExpense 
+                        ? 'bg-blue-400 cursor-not-allowed' 
+                        : 'bg-blue-600 hover:bg-blue-700'
+                    } text-white`}
                   >
-                    <Plus className="h-4 w-4" />
-                    <span>Agregar Gasto</span>
+                    {isLoadingExpense ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Plus className="h-4 w-4" />
+                    )}
+                    <span>{isLoadingExpense ? 'Procesando...' : 'Agregar Gasto'}</span>
                   </button>
                 </div>
               </div>
@@ -799,9 +805,15 @@ export default function Room() {
                 <div className="flex space-x-3 mt-6">
                   <button
                     type="submit"
-                    className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700"
+                    disabled={isLoadingExpense}
+                    className={`flex-1 flex items-center justify-center space-x-2 text-white py-2 px-4 rounded-lg transition-colors ${
+                      isLoadingExpense 
+                        ? 'bg-blue-400 cursor-not-allowed' 
+                        : 'bg-blue-600 hover:bg-blue-700'
+                    }`}
                   >
-                    Agregar
+                    {isLoadingExpense && <Loader2 className="h-4 w-4 animate-spin" />}
+                    <span>{isLoadingExpense ? 'Agregando...' : 'Agregar'}</span>
                   </button>
                   <button
                     type="button"
