@@ -27,7 +27,10 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
-  Loader2
+  Loader2,
+  Repeat,
+  Clock,
+  Zap
 } from 'lucide-react';
 import { 
   collection, 
@@ -111,12 +114,32 @@ export default function Dashboard() {
   const [editingTransaction, setEditingTransaction] = useState(null);
   const [balances, setBalances] = useState([]);
   const [showBalanceModal, setShowBalanceModal] = useState(false);
+  const [editingBalance, setEditingBalance] = useState(null);
   const [balanceData, setBalanceData] = useState({
     name: '',
     type: 'savings', // 'savings', 'debt', 'general'
     description: '',
     goal: ''
   });
+  
+  // Estados para transacciones automáticas
+  const [showRecurringModal, setShowRecurringModal] = useState(false);
+  const [recurringData, setRecurringData] = useState({
+    type: 'income', // 'income' or 'expense'
+    description: '',
+    amount: '',
+    category: '',
+    paymentMethod: 'efectivo',
+    balance: 'principal',
+    frequency: 'monthly', // 'monthly', 'weekly', 'daily'
+    dayOfMonth: 1, // día del mes para ejecutar
+    isActive: true
+  });
+  const [recurringTransactions, setRecurringTransactions] = useState([]);
+  
+  // Estados para pestañas de filtros
+  const [recurringFilter, setRecurringFilter] = useState('all'); // 'all', 'income', 'expense'
+  const [recentFilter, setRecentFilter] = useState('all'); // 'all', 'income', 'expense'
   
   // Estados para paginación
   const [currentPage, setCurrentPage] = useState(1);
@@ -217,6 +240,26 @@ export default function Dashboard() {
         ...doc.data()
       }));
       setBalances(balancesData);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    // Escuchar cambios en transacciones recurrentes
+    const recurringQuery = query(
+      collection(db, 'recurringTransactions'),
+      where('userId', '==', currentUser.uid)
+    );
+
+    const unsubscribe = onSnapshot(recurringQuery, (snapshot) => {
+      const recurringData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setRecurringTransactions(recurringData);
     });
 
     return () => unsubscribe();
@@ -502,11 +545,42 @@ export default function Dashboard() {
       return totals;
     }, {});
 
-  // Lógica de paginación
-  const totalPages = Math.ceil(personalTransactions.length / transactionsPerPage);
+  // Calcular montos actuales de cada balance basado en transacciones
+  const balancesWithCurrentAmount = balances.map(balance => {
+    const balanceTransactions = personalTransactions.filter(t => t.balance === balance.id);
+    
+    const currentAmount = balanceTransactions.reduce((total, transaction) => {
+      if (transaction.type === 'income') {
+        return total + (transaction.amount || 0);
+      } else if (transaction.type === 'expense') {
+        return total - (transaction.amount || 0);
+      }
+      return total;
+    }, 0);
+
+    return {
+      ...balance,
+      currentAmount: Math.max(0, currentAmount) // No permitir valores negativos para ahorros
+    };
+  });
+
+  // Filtrado de transacciones recurrentes
+  const filteredRecurringTransactions = recurringTransactions.filter(transaction => {
+    if (recurringFilter === 'all') return true;
+    return transaction.type === recurringFilter;
+  });
+
+  // Filtrado de transacciones recientes
+  const filteredRecentTransactions = personalTransactions.filter(transaction => {
+    if (recentFilter === 'all') return true;
+    return transaction.type === recentFilter;
+  });
+
+  // Lógica de paginación (aplicada a transacciones filtradas)
+  const totalPages = Math.ceil(filteredRecentTransactions.length / transactionsPerPage);
   const startIndex = (currentPage - 1) * transactionsPerPage;
   const endIndex = startIndex + transactionsPerPage;
-  const currentTransactions = personalTransactions.slice(startIndex, endIndex);
+  const currentTransactions = filteredRecentTransactions.slice(startIndex, endIndex);
 
   const goToPage = (page) => {
     setCurrentPage(page);
@@ -524,19 +598,43 @@ export default function Dashboard() {
     }
   };
 
+  // Funciones para cambiar filtros (resetea paginación)
+  const setRecurringFilterAndResetPage = (filter) => {
+    setRecurringFilter(filter);
+  };
+
+  const setRecentFilterAndResetPage = (filter) => {
+    setRecentFilter(filter);
+    setCurrentPage(1); // Reset pagination when filter changes
+  };
+
   // Funciones para manejar balances/bolsillos
-  function openBalanceModal() {
-    setBalanceData({
-      name: '',
-      type: 'savings',
-      description: '',
-      goal: ''
-    });
+  function openBalanceModal(balance = null) {
+    if (balance) {
+      // Modo edición
+      setEditingBalance(balance);
+      setBalanceData({
+        name: balance.name,
+        type: balance.type,
+        description: balance.description,
+        goal: balance.goal || ''
+      });
+    } else {
+      // Modo creación
+      setEditingBalance(null);
+      setBalanceData({
+        name: '',
+        type: 'savings',
+        description: '',
+        goal: ''
+      });
+    }
     setShowBalanceModal(true);
   }
 
   function closeBalanceModal() {
     setShowBalanceModal(false);
+    setEditingBalance(null);
     setBalanceData({
       name: '',
       type: 'savings',
@@ -556,20 +654,33 @@ export default function Dashboard() {
 
     setIsLoadingBalance(true);
     try {
-      await addDoc(collection(db, 'balances'), {
-        userId: currentUser.uid,
-        name: balanceData.name,
-        type: balanceData.type,
-        description: balanceData.description,
-        goal: balanceData.goal ? parseFloat(balanceData.goal) : null,
-        currentAmount: 0,
-        createdAt: serverTimestamp()
-      });
+      if (editingBalance) {
+        // Modo edición - actualizar balance existente
+        await updateDoc(doc(db, 'balances', editingBalance.id), {
+          name: balanceData.name,
+          type: balanceData.type,
+          description: balanceData.description,
+          goal: balanceData.goal ? parseFloat(balanceData.goal) : null,
+          updatedAt: serverTimestamp()
+        });
+        toast.success('Balance actualizado exitosamente');
+      } else {
+        // Modo creación - crear nuevo balance
+        await addDoc(collection(db, 'balances'), {
+          userId: currentUser.uid,
+          name: balanceData.name,
+          type: balanceData.type,
+          description: balanceData.description,
+          goal: balanceData.goal ? parseFloat(balanceData.goal) : null,
+          currentAmount: 0,
+          createdAt: serverTimestamp()
+        });
+        toast.success('Balance creado exitosamente');
+      }
 
       closeBalanceModal();
-      toast.success('Balance creado exitosamente');
     } catch (error) {
-      toast.error('Error al crear el balance');
+      toast.error(editingBalance ? 'Error al actualizar el balance' : 'Error al crear el balance');
     } finally {
       setIsLoadingBalance(false);
     }
@@ -611,6 +722,89 @@ export default function Dashboard() {
         return <Wallet className="h-5 w-5" />;
       default:
         return <Wallet className="h-5 w-5" />;
+    }
+  }
+
+  // Funciones para transacciones recurrentes
+  function openRecurringModal(type = 'income') {
+    setRecurringData({
+      type,
+      description: '',
+      amount: '',
+      category: '',
+      paymentMethod: 'efectivo',
+      balance: 'principal',
+      frequency: 'monthly',
+      dayOfMonth: 1,
+      isActive: true
+    });
+    setShowRecurringModal(true);
+  }
+
+  function closeRecurringModal() {
+    setShowRecurringModal(false);
+    setRecurringData({
+      type: 'income',
+      description: '',
+      amount: '',
+      category: '',
+      paymentMethod: 'efectivo',
+      balance: 'principal',
+      frequency: 'monthly',
+      dayOfMonth: 1,
+      isActive: true
+    });
+  }
+
+  async function addRecurringTransaction(e) {
+    e.preventDefault();
+    if (!recurringData.description || !recurringData.amount || !recurringData.category) {
+      toast.error('Por favor completa todos los campos');
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, 'recurringTransactions'), {
+        userId: currentUser.uid,
+        type: recurringData.type,
+        description: recurringData.description,
+        amount: parseFloat(recurringData.amount),
+        category: recurringData.category,
+        paymentMethod: recurringData.paymentMethod,
+        balance: recurringData.balance,
+        frequency: recurringData.frequency,
+        dayOfMonth: parseInt(recurringData.dayOfMonth),
+        isActive: recurringData.isActive,
+        createdAt: serverTimestamp(),
+        lastExecuted: null
+      });
+
+      closeRecurringModal();
+      toast.success(`${recurringData.type === 'income' ? 'Ingreso' : 'Egreso'} automático creado exitosamente`);
+    } catch (error) {
+      toast.error('Error al crear la transacción automática');
+    }
+  }
+
+  async function toggleRecurringTransaction(id, isActive) {
+    try {
+      await updateDoc(doc(db, 'recurringTransactions', id), {
+        isActive: !isActive
+      });
+      toast.success(isActive ? 'Transacción automática pausada' : 'Transacción automática activada');
+    } catch (error) {
+      toast.error('Error al cambiar el estado');
+    }
+  }
+
+  async function deleteRecurringTransaction(id) {
+    if (!window.confirm('¿Estás seguro de que quieres eliminar esta transacción automática?')) return;
+
+    try {
+      await deleteDoc(doc(db, 'recurringTransactions', id));
+      toast.success('Transacción automática eliminada');
+    } catch (error) {
+      toast.error('Error al eliminar la transacción automática');
     }
   }
 
@@ -787,16 +981,16 @@ export default function Dashboard() {
                 <button
                   onClick={() => openTransactionModal('income')}
                   disabled={isLoadingTransaction}
-                  className={`flex items-center space-x-2 px-6 py-3 rounded-lg transition-colors ${
+                  className={`group flex items-center space-x-2 px-6 py-3 rounded-xl font-medium transition-all duration-200 transform ${
                     isLoadingTransaction 
                       ? 'bg-emerald-400 cursor-not-allowed' 
-                      : 'bg-emerald-600 hover:bg-emerald-700'
-                  } text-white`}
+                      : 'bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 hover:scale-105 hover:shadow-lg'
+                  } text-white shadow-md`}
                 >
                   {isLoadingTransaction ? (
                     <Loader2 className="h-5 w-5 animate-spin" />
                   ) : (
-                    <TrendingUp className="h-5 w-5" />
+                    <TrendingUp className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
                   )}
                   <span>{isLoadingTransaction ? 'Procesando...' : 'Agregar Ingreso'}</span>
                 </button>
@@ -804,16 +998,16 @@ export default function Dashboard() {
                 <button
                   onClick={() => openTransactionModal('expense')}
                   disabled={isLoadingTransaction}
-                  className={`flex items-center space-x-2 px-6 py-3 rounded-lg transition-colors ${
+                  className={`group flex items-center space-x-2 px-6 py-3 rounded-xl font-medium transition-all duration-200 transform ${
                     isLoadingTransaction 
                       ? 'bg-red-400 cursor-not-allowed' 
-                      : 'bg-red-600 hover:bg-red-700'
-                  } text-white`}
+                      : 'bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 hover:scale-105 hover:shadow-lg'
+                  } text-white shadow-md`}
                 >
                   {isLoadingTransaction ? (
                     <Loader2 className="h-5 w-5 animate-spin" />
                   ) : (
-                    <TrendingDown className="h-5 w-5" />
+                    <TrendingDown className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
                   )}
                   <span>{isLoadingTransaction ? 'Procesando...' : 'Agregar Egreso'}</span>
                 </button>
@@ -821,24 +1015,40 @@ export default function Dashboard() {
                 <button
                   onClick={openBalanceModal}
                   disabled={isLoadingBalance}
-                  className={`flex items-center space-x-2 px-6 py-3 rounded-lg transition-colors ${
+                  className={`group flex items-center space-x-2 px-6 py-3 rounded-xl font-medium transition-all duration-200 transform ${
                     isLoadingBalance 
                       ? 'bg-purple-400 cursor-not-allowed' 
-                      : 'bg-purple-600 hover:bg-purple-700'
-                  } text-white`}
+                      : 'bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 hover:scale-105 hover:shadow-lg'
+                  } text-white shadow-md`}
                 >
                   {isLoadingBalance ? (
                     <Loader2 className="h-5 w-5 animate-spin" />
                   ) : (
-                    <PiggyBank className="h-5 w-5" />
+                    <PiggyBank className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
                   )}
                   <span>{isLoadingBalance ? 'Creando...' : 'Crear Balance'}</span>
+                </button>
+
+                <button
+                  onClick={() => openRecurringModal('income')}
+                  className="group flex items-center space-x-2 px-6 py-3 rounded-xl font-medium bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white shadow-md hover:scale-105 hover:shadow-lg transition-all duration-200 transform"
+                >
+                  <Repeat className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
+                  <span>Ingreso Automático</span>
+                </button>
+
+                <button
+                  onClick={() => openRecurringModal('expense')}
+                  className="group flex items-center space-x-2 px-6 py-3 rounded-xl font-medium bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white shadow-md hover:scale-105 hover:shadow-lg transition-all duration-200 transform"
+                >
+                  <Clock className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
+                  <span>Egreso Automático</span>
                 </button>
               </div>
             </div>
 
             {/* Balances/Bolsillos */}
-            {balances.length > 0 && (
+            {balancesWithCurrentAmount.length > 0 && (
               <div className="mb-8">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
                   <Target className="h-5 w-5 mr-2" />
@@ -846,23 +1056,33 @@ export default function Dashboard() {
                 </h3>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {balances.map((balance) => (
-                    <div key={balance.id} className={`p-4 rounded-lg border-2 ${
-                      balance.type === 'savings' ? 'bg-green-50 border-green-200' :
-                      balance.type === 'debt' ? 'bg-red-50 border-red-200' :
-                      'bg-blue-50 border-blue-200'
+                  {balancesWithCurrentAmount.map((balance) => (
+                    <div key={balance.id} className={`p-6 rounded-xl shadow-lg border-2 transition-all duration-200 hover:shadow-xl hover:scale-105 ${
+                      balance.type === 'savings' ? 'bg-gradient-to-br from-green-50 to-green-100 border-green-200 hover:border-green-300' :
+                      balance.type === 'debt' ? 'bg-gradient-to-br from-red-50 to-red-100 border-red-200 hover:border-red-300' :
+                      'bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200 hover:border-blue-300'
                     }`}>
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center space-x-2">
                           {getBalanceTypeIcon(balance.type)}
                           <h4 className="font-semibold text-gray-900">{balance.name}</h4>
                         </div>
-                        <button
-                          onClick={() => deleteBalance(balance.id)}
-                          className="text-red-600 hover:text-red-800"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <div className="flex items-center space-x-1">
+                          <button
+                            onClick={() => openBalanceModal(balance)}
+                            className="group p-2 rounded-lg hover:bg-blue-100 transition-all duration-200 transform hover:scale-110"
+                            title="Editar balance"
+                          >
+                            <Edit3 className="h-4 w-4 text-blue-600 group-hover:text-blue-700" />
+                          </button>
+                          <button
+                            onClick={() => deleteBalance(balance.id)}
+                            className="group p-2 rounded-lg hover:bg-red-100 transition-all duration-200 transform hover:scale-110"
+                            title="Eliminar balance"
+                          >
+                            <Trash2 className="h-4 w-4 text-red-600 group-hover:text-red-700" />
+                          </button>
+                        </div>
                       </div>
                       <p className="text-sm text-gray-600 mb-2">{balance.description}</p>
                       <div className="flex justify-between items-center">
@@ -897,6 +1117,150 @@ export default function Dashboard() {
               </div>
             )}
 
+            {/* Transacciones Automáticas */}
+            {recurringTransactions.length > 0 && (
+              <div className="mb-8">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                  <Zap className="h-5 w-5 mr-2" />
+                  Transacciones Automáticas
+                </h3>
+                
+                <div className="bg-white rounded-lg shadow border">
+                  {/* Pestañas para Transacciones Automáticas */}
+                  <div className="border-b border-gray-200 bg-gray-50 rounded-t-lg">
+                    <nav className="flex space-x-1 px-6 pt-4 pb-2" aria-label="Tabs">
+                      <button
+                        onClick={() => setRecurringFilterAndResetPage('all')}
+                        className={`px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 ${
+                          recurringFilter === 'all'
+                            ? 'bg-blue-100 text-blue-700 shadow-sm border border-blue-200'
+                            : 'text-gray-600 hover:text-gray-800 hover:bg-white hover:shadow-sm'
+                        }`}
+                      >
+                        Todas ({recurringTransactions.length})
+                      </button>
+                      <button
+                        onClick={() => setRecurringFilterAndResetPage('income')}
+                        className={`px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 ${
+                          recurringFilter === 'income'
+                            ? 'bg-green-100 text-green-700 shadow-sm border border-green-200'
+                            : 'text-gray-600 hover:text-gray-800 hover:bg-white hover:shadow-sm'
+                        }`}
+                      >
+                        Ingresos ({recurringTransactions.filter(t => t.type === 'income').length})
+                      </button>
+                      <button
+                        onClick={() => setRecurringFilterAndResetPage('expense')}
+                        className={`px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 ${
+                          recurringFilter === 'expense'
+                            ? 'bg-red-100 text-red-700 shadow-sm border border-red-200'
+                            : 'text-gray-600 hover:text-gray-800 hover:bg-white hover:shadow-sm'
+                        }`}
+                      >
+                        Gastos ({recurringTransactions.filter(t => t.type === 'expense').length})
+                      </button>
+                    </nav>
+                  </div>
+                  
+                  <div className="p-6">
+                    {filteredRecurringTransactions.length > 0 ? (
+                      <div className="grid gap-4">
+                        {filteredRecurringTransactions.map((recurring) => (
+                        <div key={recurring.id} className={`p-4 rounded-lg border-l-4 ${
+                          recurring.type === 'income' 
+                            ? 'bg-green-50 border-l-green-500' 
+                            : 'bg-red-50 border-l-red-500'
+                        }`}>
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between space-y-3 sm:space-y-0">
+                            <div className="flex items-start space-x-3">
+                              <div className={`p-2 rounded-full flex-shrink-0 ${
+                                recurring.type === 'income' ? 'bg-green-100' : 'bg-red-100'
+                              }`}>
+                                <Repeat className={`h-5 w-5 ${
+                                  recurring.type === 'income' ? 'text-green-600' : 'text-red-600'
+                                }`} />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-semibold text-gray-900 truncate">{recurring.description}</p>
+                                
+                                <div className="flex flex-wrap items-center gap-2 mt-1 text-sm text-gray-600">
+                                  <span className={`inline-block px-2 py-1 rounded-full text-xs flex-shrink-0 ${
+                                    recurring.type === 'income' 
+                                      ? 'bg-green-100 text-green-800' 
+                                      : 'bg-red-100 text-red-800'
+                                  }`}>
+                                    {recurring.category}
+                                  </span>
+                                  
+                                  <span className="flex items-center space-x-1 bg-blue-100 px-2 py-1 rounded-full text-xs flex-shrink-0">
+                                    <Clock className="h-3 w-3" />
+                                    <span>Día {recurring.dayOfMonth} de cada mes</span>
+                                  </span>
+                                  
+                                  <span className={`inline-block px-2 py-1 rounded-full text-xs flex-shrink-0 ${
+                                    recurring.isActive 
+                                      ? 'bg-green-100 text-green-800' 
+                                      : 'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {recurring.isActive ? 'Activo' : 'Pausado'}
+                                  </span>
+                                </div>
+                                
+                                {recurring.balance && recurring.balance !== 'principal' && (
+                                  <p className="text-xs text-purple-600 mt-1 truncate">
+                                    Balance: {balancesWithCurrentAmount.find(b => b.id === recurring.balance)?.name || recurring.balance}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center justify-between sm:justify-end space-x-2 flex-shrink-0">
+                              <span className={`font-bold text-lg ${
+                                recurring.type === 'income' ? 'text-green-600' : 'text-red-600'
+                              }`}>
+                                {recurring.type === 'income' ? '+' : '-'}{formatCurrency(recurring.amount)}
+                              </span>
+                              
+                              <div className="flex items-center space-x-1">
+                                <button
+                                  onClick={() => toggleRecurringTransaction(recurring.id, recurring.isActive)}
+                                  className={`p-1 rounded transition-colors ${
+                                    recurring.isActive 
+                                      ? 'text-orange-600 hover:text-orange-800 hover:bg-orange-100' 
+                                      : 'text-green-600 hover:text-green-800 hover:bg-green-100'
+                                  }`}
+                                  title={recurring.isActive ? 'Pausar' : 'Activar'}
+                                >
+                                  {recurring.isActive ? (
+                                    <Clock className="h-4 w-4" />
+                                  ) : (
+                                    <Zap className="h-4 w-4" />
+                                  )}
+                                </button>
+                                <button
+                                  onClick={() => deleteRecurringTransaction(recurring.id)}
+                                  className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-100 transition-colors"
+                                  title="Eliminar transacción automática"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-gray-500">
+                        <Zap className="h-12 w-12 mx-auto mb-3 opacity-30" />
+                        <p>No hay transacciones automáticas de tipo "{recurringFilter === 'income' ? 'ingresos' : recurringFilter === 'expense' ? 'gastos' : 'todas'}"</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Transacciones Recientes */}
             {personalTransactions.length > 0 && (
               <div className="mb-8">
@@ -906,17 +1270,55 @@ export default function Dashboard() {
                 </h3>
                 
                 <div className="bg-white rounded-lg shadow border">
+                  {/* Pestañas para Transacciones Recientes */}
+                  <div className="border-b border-gray-200 bg-gray-50 rounded-t-lg">
+                    <nav className="flex space-x-1 px-6 pt-4 pb-2" aria-label="Tabs">
+                      <button
+                        onClick={() => setRecentFilterAndResetPage('all')}
+                        className={`px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 ${
+                          recentFilter === 'all'
+                            ? 'bg-blue-100 text-blue-700 shadow-sm border border-blue-200'
+                            : 'text-gray-600 hover:text-gray-800 hover:bg-white hover:shadow-sm'
+                        }`}
+                      >
+                        Todas ({personalTransactions.length})
+                      </button>
+                      <button
+                        onClick={() => setRecentFilterAndResetPage('income')}
+                        className={`px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 ${
+                          recentFilter === 'income'
+                            ? 'bg-green-100 text-green-700 shadow-sm border border-green-200'
+                            : 'text-gray-600 hover:text-gray-800 hover:bg-white hover:shadow-sm'
+                        }`}
+                      >
+                        Ingresos ({personalTransactions.filter(t => t.type === 'income').length})
+                      </button>
+                      <button
+                        onClick={() => setRecentFilterAndResetPage('expense')}
+                        className={`px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 ${
+                          recentFilter === 'expense'
+                            ? 'bg-red-100 text-red-700 shadow-sm border border-red-200'
+                            : 'text-gray-600 hover:text-gray-800 hover:bg-white hover:shadow-sm'
+                        }`}
+                      >
+                        Gastos ({personalTransactions.filter(t => t.type === 'expense').length})
+                      </button>
+                    </nav>
+                  </div>
+                  
                   <div className="p-6">
-                    <div className="grid gap-4">
-                      {currentTransactions.map((transaction) => (
+                    {currentTransactions.length > 0 ? (
+                      <div className="grid gap-4">
+                        {currentTransactions.map((transaction) => (
                         <div key={transaction.id} className={`p-4 rounded-lg border-l-4 ${
                           transaction.type === 'income' 
                             ? 'bg-green-50 border-l-green-500' 
                             : 'bg-red-50 border-l-red-500'
                         }`}>
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center space-x-3">
-                              <div className={`p-2 rounded-full ${
+                          {/* Diseño responsive mejorado */}
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between space-y-3 sm:space-y-0">
+                            <div className="flex items-start space-x-3">
+                              <div className={`p-2 rounded-full flex-shrink-0 ${
                                 transaction.type === 'income' ? 'bg-green-100' : 'bg-red-100'
                               }`}>
                                 {transaction.type === 'income' ? (
@@ -925,74 +1327,91 @@ export default function Dashboard() {
                                   <TrendingDown className="h-5 w-5 text-red-600" />
                                 )}
                               </div>
-                              <div>
-                                <p className="font-semibold text-gray-900">{transaction.description}</p>
-                                <div className="flex items-center space-x-2 text-sm text-gray-600">
-                                  <span className={`inline-block px-2 py-1 rounded-full text-xs ${
+                              <div className="min-w-0 flex-1">
+                                <p className="font-semibold text-gray-900 truncate">{transaction.description}</p>
+                                
+                                {/* Información adicional en mobile */}
+                                <div className="flex flex-wrap items-center gap-2 mt-1 text-sm text-gray-600">
+                                  <span className={`inline-block px-2 py-1 rounded-full text-xs flex-shrink-0 ${
                                     transaction.type === 'income' 
                                       ? 'bg-green-100 text-green-800' 
                                       : 'bg-red-100 text-red-800'
                                   }`}>
                                     {transaction.category}
                                   </span>
+                                  
                                   {transaction.paymentMethod && (
-                                    <span className="flex items-center space-x-1 bg-gray-100 px-2 py-1 rounded-full text-xs">
+                                    <span className="flex items-center space-x-1 bg-gray-100 px-2 py-1 rounded-full text-xs flex-shrink-0">
                                       {getPaymentMethodIcon(transaction.paymentMethod)}
                                       <span className="capitalize">{transaction.paymentMethod}</span>
                                     </span>
                                   )}
-                                  <span>{formatDateString(transaction.date)}</span>
+                                  
+                                  <span className="text-xs flex-shrink-0">{formatDateString(transaction.date)}</span>
                                 </div>
+                                
                                 {transaction.balance && transaction.balance !== 'principal' && (
-                                  <p className="text-xs text-purple-600 mt-1">
-                                    Balance: {balances.find(b => b.id === transaction.balance)?.name || transaction.balance}
+                                  <p className="text-xs text-purple-600 mt-1 truncate">
+                                    Balance: {balancesWithCurrentAmount.find(b => b.id === transaction.balance)?.name || transaction.balance}
                                   </p>
                                 )}
                               </div>
                             </div>
-                            <div className="flex items-center space-x-2">
+                            
+                            {/* Monto y acciones */}
+                            <div className="flex items-center justify-between sm:justify-end space-x-2 flex-shrink-0">
                               <span className={`font-bold text-lg ${
                                 transaction.type === 'income' ? 'text-green-600' : 'text-red-600'
                               }`}>
                                 {transaction.type === 'income' ? '+' : '-'}{formatCurrency(transaction.amount)}
                               </span>
-                              <button
-                                onClick={() => openTransactionModal(transaction.type, transaction)}
-                                className="text-blue-600 hover:text-blue-800 p-1 rounded hover:bg-blue-100 transition-colors"
-                                title="Editar transacción"
-                              >
-                                <Edit3 className="h-4 w-4" />
-                              </button>
-                              <button
-                                onClick={() => deleteTransaction(transaction.id)}
-                                className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-100 transition-colors"
-                                title="Eliminar transacción"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
+                              
+                              <div className="flex items-center space-x-1">
+                                <button
+                                  onClick={() => openTransactionModal(transaction.type, transaction)}
+                                  className="group p-2 rounded-lg hover:bg-blue-100 transition-all duration-200 transform hover:scale-110"
+                                  title="Editar transacción"
+                                >
+                                  <Edit3 className="h-4 w-4 text-blue-600 group-hover:text-blue-700" />
+                                </button>
+                                <button
+                                  onClick={() => deleteTransaction(transaction.id)}
+                                  className="group p-2 rounded-lg hover:bg-red-100 transition-all duration-200 transform hover:scale-110"
+                                  title="Eliminar transacción"
+                                >
+                                  <Trash2 className="h-4 w-4 text-red-600 group-hover:text-red-700" />
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                    {personalTransactions.length > transactionsPerPage && (
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-gray-500">
+                        <Calendar className="h-12 w-12 mx-auto mb-3 opacity-30" />
+                        <p>No hay transacciones de tipo "{recentFilter === 'income' ? 'ingresos' : recentFilter === 'expense' ? 'gastos' : 'todas'}"</p>
+                      </div>
+                    )}
+                    
+                    {filteredRecentTransactions.length > transactionsPerPage && (
                       <div className="mt-6 border-t pt-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between space-y-4 sm:space-y-0">
+                          <div className="flex items-center justify-center sm:justify-start">
                             <Calendar className="h-4 w-4 text-gray-500 mr-2" />
                             <span className="text-sm text-gray-600 font-medium">
-                              Mostrando {startIndex + 1} - {Math.min(endIndex, personalTransactions.length)} de {personalTransactions.length} transacciones
+                              Mostrando {startIndex + 1} - {Math.min(endIndex, filteredRecentTransactions.length)} de {filteredRecentTransactions.length} transacciones {recentFilter !== 'all' ? `(${recentFilter === 'income' ? 'ingresos' : 'gastos'})` : ''}
                             </span>
                           </div>
                           
-                          <div className="flex items-center space-x-2">
+                          <div className="flex items-center justify-center space-x-2">
                             <button
                               onClick={goToPreviousPage}
                               disabled={currentPage === 1}
-                              className={`flex items-center px-3 py-2 rounded-lg border transition-colors ${
+                              className={`flex items-center px-4 py-2 rounded-xl border transition-all duration-200 ${
                                 currentPage === 1 
-                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                                  : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-300'
+                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200' 
+                                  : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-300 hover:shadow-md transform hover:scale-105'
                               }`}
                             >
                               <ChevronLeft className="h-4 w-4 mr-1" />
@@ -1004,10 +1423,10 @@ export default function Dashboard() {
                                 <button
                                   key={page}
                                   onClick={() => goToPage(page)}
-                                  className={`px-3 py-2 rounded-lg transition-colors ${
+                                  className={`px-3 py-2 rounded-xl transition-all duration-200 transform ${
                                     currentPage === page
-                                      ? 'bg-blue-600 text-white'
-                                      : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                                      ? 'bg-blue-600 text-white shadow-lg scale-110'
+                                      : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300 hover:shadow-md hover:scale-105'
                                   }`}
                                 >
                                   {page}
@@ -1018,10 +1437,10 @@ export default function Dashboard() {
                             <button
                               onClick={goToNextPage}
                               disabled={currentPage === totalPages}
-                              className={`flex items-center px-3 py-2 rounded-lg border transition-colors ${
+                              className={`flex items-center px-4 py-2 rounded-xl border transition-all duration-200 ${
                                 currentPage === totalPages 
-                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                                  : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-300'
+                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200' 
+                                  : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-300 hover:shadow-md transform hover:scale-105'
                               }`}
                             >
                               Siguiente
@@ -1461,7 +1880,7 @@ export default function Dashboard() {
                       className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     >
                       <option value="principal">💼 Balance Principal</option>
-                      {balances.map(balance => (
+                      {balancesWithCurrentAmount.map(balance => (
                         <option key={balance.id} value={balance.id}>
                           {balance.type === 'savings' ? '🐷' : balance.type === 'debt' ? '⚠️' : '💰'} {balance.name}
                         </option>
@@ -1509,7 +1928,9 @@ export default function Dashboard() {
         {showBalanceModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-lg p-6 w-full max-w-md">
-              <h3 className="text-lg font-semibold mb-4">Crear Nuevo Balance</h3>
+              <h3 className="text-lg font-semibold mb-4">
+                {editingBalance ? 'Editar Balance' : 'Crear Nuevo Balance'}
+              </h3>
               <form onSubmit={addBalance}>
                 <div className="space-y-4">
                   <div>
@@ -1586,11 +2007,178 @@ export default function Dashboard() {
                     }`}
                   >
                     {isLoadingBalance && <Loader2 className="h-4 w-4 animate-spin" />}
-                    <span>{isLoadingBalance ? 'Creando...' : 'Crear Balance'}</span>
+                    <span>
+                      {isLoadingBalance 
+                        ? (editingBalance ? 'Actualizando...' : 'Creando...') 
+                        : (editingBalance ? 'Actualizar Balance' : 'Crear Balance')
+                      }
+                    </span>
                   </button>
                   <button
                     type="button"
                     onClick={closeBalanceModal}
+                    className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Recurring Transaction Modal */}
+        {showRecurringModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md">
+              <h3 className="text-lg font-semibold mb-4">
+                Crear {recurringData.type === 'income' ? 'Ingreso' : 'Egreso'} Automático
+              </h3>
+              <form onSubmit={addRecurringTransaction}>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Tipo
+                    </label>
+                    <select
+                      value={recurringData.type}
+                      onChange={(e) => setRecurringData({...recurringData, type: e.target.value})}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="income">Ingreso</option>
+                      <option value="expense">Egreso</option>
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Descripción
+                    </label>
+                    <input
+                      type="text"
+                      value={recurringData.description}
+                      onChange={(e) => setRecurringData({...recurringData, description: e.target.value})}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Ej: Salario, Arriendo, Servicios..."
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Monto (COP)
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      value={recurringData.amount}
+                      onChange={(e) => setRecurringData({...recurringData, amount: e.target.value})}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="0"
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Categoría
+                    </label>
+                    <select
+                      value={recurringData.category}
+                      onChange={(e) => setRecurringData({...recurringData, category: e.target.value})}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      required
+                    >
+                      <option value="">Selecciona una categoría</option>
+                      {recurringData.type === 'income' ? (
+                        <>
+                          <option value="Salario">Salario</option>
+                          <option value="Freelance">Freelance</option>
+                          <option value="Inversiones">Inversiones</option>
+                          <option value="Otros ingresos">Otros ingresos</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="Arriendo">Arriendo</option>
+                          <option value="Servicios">Servicios públicos</option>
+                          <option value="Internet">Internet</option>
+                          <option value="Celular">Celular</option>
+                          <option value="Gimnasio">Gimnasio</option>
+                          <option value="Suscripciones">Suscripciones</option>
+                          <option value="Otros gastos">Otros gastos</option>
+                        </>
+                      )}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Día del mes para ejecutar
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="28"
+                      value={recurringData.dayOfMonth}
+                      onChange={(e) => setRecurringData({...recurringData, dayOfMonth: e.target.value})}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      required
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Recomendado: día 1-28 para que funcione en todos los meses
+                    </p>
+                  </div>
+                  
+                  {recurringData.type === 'expense' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Método de Pago
+                      </label>
+                      <select
+                        value={recurringData.paymentMethod}
+                        onChange={(e) => setRecurringData({...recurringData, paymentMethod: e.target.value})}
+                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      >
+                        <option value="efectivo">💵 Efectivo</option>
+                        <option value="tarjeta">💳 Tarjeta</option>
+                        <option value="puntos">🎁 Puntos</option>
+                      </select>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Balance
+                    </label>
+                    <select
+                      value={recurringData.balance}
+                      onChange={(e) => setRecurringData({...recurringData, balance: e.target.value})}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="principal">💼 Balance Principal</option>
+                      {balancesWithCurrentAmount.map(balance => (
+                        <option key={balance.id} value={balance.id}>
+                          {balance.type === 'savings' ? '🐷' : balance.type === 'debt' ? '⚠️' : '💰'} {balance.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                
+                <div className="flex space-x-3 mt-6">
+                  <button
+                    type="submit"
+                    className={`flex-1 text-white py-2 px-4 rounded-lg transition-colors ${
+                      recurringData.type === 'income' 
+                        ? 'bg-emerald-600 hover:bg-emerald-700' 
+                        : 'bg-red-600 hover:bg-red-700'
+                    }`}
+                  >
+                    Crear {recurringData.type === 'income' ? 'Ingreso' : 'Egreso'} Automático
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeRecurringModal}
                     className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400"
                   >
                     Cancelar
