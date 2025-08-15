@@ -30,6 +30,16 @@ import {
 import { db } from '../firebase';
 import toast from 'react-hot-toast';
 
+// Función para formatear moneda en pesos colombianos
+function formatCurrency(amount) {
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  }).format(amount);
+}
+
 export default function Room() {
   const { roomId } = useParams();
   const { currentUser } = useAuth();
@@ -434,7 +444,7 @@ export default function Room() {
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Total Gastos</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  ${totalExpenses.toFixed(2)}
+                  {formatCurrency(totalExpenses)}
                 </p>
               </div>
             </div>
@@ -466,7 +476,7 @@ export default function Room() {
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Promedio</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  ${members.length > 0 ? (totalExpenses / members.length).toFixed(2) : '0.00'}
+                  {formatCurrency(members.length > 0 ? (totalExpenses / members.length) : 0)}
                 </p>
               </div>
             </div>
@@ -528,10 +538,10 @@ export default function Room() {
                               onClick={() => openExpenseModal(expense)}
                             >
                               <p className="text-lg font-semibold text-gray-900">
-                                ${expense.amount.toFixed(2)}
+                                {formatCurrency(expense.amount)}
                               </p>
                               <p className="text-sm text-gray-600">
-                                ${expense.splitAmount.toFixed(2)} c/u
+                                {formatCurrency(expense.splitAmount)} c/u
                               </p>
                             </div>
                             {expense.createdBy === currentUser.uid && (
@@ -582,7 +592,7 @@ export default function Room() {
                             {member?.displayName || 'Usuario'}
                           </span>
                           <span className="text-sm font-semibold text-green-600">
-                            ${totalPaid.toFixed(2)} pagado
+                            {formatCurrency(totalPaid)} pagado
                           </span>
                         </div>
                         
@@ -639,7 +649,7 @@ export default function Room() {
                             </div>
                             <div className="flex items-center space-x-2">
                               <span className="text-sm font-semibold text-red-600">
-                                ${debt.amount.toFixed(2)}
+                                {formatCurrency(debt.amount)}
                               </span>
                               {userAccounts[debt.toId] && userAccounts[debt.toId].length > 0 && (
                                 <button
@@ -954,7 +964,7 @@ export default function Room() {
                   
                   <div>
                     <p className="text-sm font-medium text-gray-700">Monto Total</p>
-                    <p className="text-2xl font-semibold text-green-600">${selectedExpense.amount.toFixed(2)}</p>
+                    <p className="text-2xl font-semibold text-green-600">{formatCurrency(selectedExpense.amount)}</p>
                   </div>
                   
                   <div>
@@ -980,7 +990,7 @@ export default function Room() {
                               {shares > 1 && <span className="text-xs text-gray-500 ml-1">({shares}x)</span>}
                             </span>
                             <span className="text-sm font-medium text-gray-900">
-                              ${personalAmount.toFixed(2)}
+                              {formatCurrency(personalAmount)}
                             </span>
                           </div>
                         );
