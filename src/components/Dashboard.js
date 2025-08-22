@@ -612,7 +612,7 @@ export default function Dashboard() {
   function openBalanceModal(balance = null) {
     if (balance) {
       // Modo edición
-      setEditingBalance(balance);
+      setEditingBalance(null);
       setBalanceData({
         name: balance.name,
         type: balance.type,
@@ -621,7 +621,7 @@ export default function Dashboard() {
       });
     } else {
       // Modo creación
-      setEditingBalance(null);
+      setEditingBalance(balance);
       setBalanceData({
         name: '',
         type: 'savings',
