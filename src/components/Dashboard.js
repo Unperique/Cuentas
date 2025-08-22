@@ -610,18 +610,21 @@ export default function Dashboard() {
 
   // Funciones para manejar balances/bolsillos
   function openBalanceModal(balance = null) {
-    if (balance) {
+    // Validación más robusta para determinar si es modo edición
+    const isEditMode = balance && balance.id && typeof balance === 'object';
+    
+    if (isEditMode) {
       // Modo edición
-      setEditingBalance(null);
+      setEditingBalance(balance);
       setBalanceData({
-        name: balance.name,
-        type: balance.type,
-        description: balance.description,
+        name: balance.name || '',
+        type: balance.type || 'savings',
+        description: balance.description || '',
         goal: balance.goal || ''
       });
-    } else {
+    } else { 
       // Modo creación
-      setEditingBalance(balance);
+      setEditingBalance(null);
       setBalanceData({
         name: '',
         type: 'savings',
