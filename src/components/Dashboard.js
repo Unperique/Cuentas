@@ -149,6 +149,16 @@ export default function Dashboard() {
   const [isLoadingTransaction, setIsLoadingTransaction] = useState(false);
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
   const [isLoadingRoom, setIsLoadingRoom] = useState(false);
+  
+  // Estados para transferencias entre balances
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [isLoadingTransfer, setIsLoadingTransfer] = useState(false);
+  const [transferData, setTransferData] = useState({
+    fromBalance: 'principal',
+    toBalance: '',
+    amount: '',
+    description: ''
+  });
 
   useEffect(() => {
     if (!currentUser) return;
@@ -811,6 +821,116 @@ export default function Dashboard() {
     }
   }
 
+  // Funciones para transferencias entre balances
+  function openTransferModal() {
+    setTransferData({
+      fromBalance: 'principal',
+      toBalance: '',
+      amount: '',
+      description: ''
+    });
+    setShowTransferModal(true);
+  }
+
+  function closeTransferModal() {
+    setShowTransferModal(false);
+    setTransferData({
+      fromBalance: 'principal',
+      toBalance: '',
+      amount: '',
+      description: ''
+    });
+  }
+
+  async function processTransfer(e) {
+    e.preventDefault();
+    if (isLoadingTransfer) return;
+
+    // Validaciones
+    if (!transferData.amount || !transferData.toBalance || !transferData.description) {
+      toast.error('Por favor completa todos los campos');
+      return;
+    }
+
+    if (transferData.fromBalance === transferData.toBalance) {
+      toast.error('No puedes transferir al mismo balance');
+      return;
+    }
+
+    const amount = parseFloat(transferData.amount);
+    if (amount <= 0) {
+      toast.error('El monto debe ser mayor a cero');
+      return;
+    }
+
+    // Verificar fondos suficientes en el balance origen
+    let fromBalanceAmount = 0;
+    if (transferData.fromBalance === 'principal') {
+      fromBalanceAmount = balance; // balance principal calculado
+    } else {
+      const fromBalanceObj = balancesWithCurrentAmount.find(b => b.id === transferData.fromBalance);
+      if (fromBalanceObj) {
+        fromBalanceAmount = fromBalanceObj.currentAmount || 0;
+      }
+    }
+
+    if (fromBalanceAmount < amount) {
+      toast.error('Fondos insuficientes en el balance origen');
+      return;
+    }
+
+    setIsLoadingTransfer(true);
+    try {
+      const currentDate = getLocalDateString();
+      
+      // Crear transacción de egreso en el balance origen
+      const outgoingTransaction = {
+        userId: currentUser.uid,
+        type: 'expense',
+        description: `Transferencia a: ${transferData.description}`,
+        amount: amount,
+        category: 'Transferencia',
+        date: currentDate,
+        paymentMethod: 'transferencia',
+        balance: transferData.fromBalance,
+        isTransfer: true,
+        transferDirection: 'outgoing',
+        transferId: Date.now().toString(), // ID único para emparejar las transacciones
+        createdAt: serverTimestamp()
+      };
+
+      // Crear transacción de ingreso en el balance destino
+      const incomingTransaction = {
+        userId: currentUser.uid,
+        type: 'income',
+        description: `Transferencia desde: ${transferData.description}`,
+        amount: amount,
+        category: 'Transferencia',
+        date: currentDate,
+        paymentMethod: 'transferencia',
+        balance: transferData.toBalance,
+        isTransfer: true,
+        transferDirection: 'incoming',
+        transferId: outgoingTransaction.transferId,
+        createdAt: serverTimestamp()
+      };
+
+      // Agregar ambas transacciones
+      await Promise.all([
+        addDoc(collection(db, 'personalTransactions'), outgoingTransaction),
+        addDoc(collection(db, 'personalTransactions'), incomingTransaction)
+      ]);
+
+      toast.success(`Transferencia de ${formatCurrency(amount)} realizada exitosamente`);
+      closeTransferModal();
+    } catch (error) {
+      console.error('Error al procesar transferencia:', error);
+      toast.error('Error al procesar la transferencia');
+    } finally {
+      setIsLoadingTransfer(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -1046,6 +1166,23 @@ export default function Dashboard() {
                 >
                   <Clock className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
                   <span>Egreso Automático</span>
+                </button>
+
+                <button
+                  onClick={openTransferModal}
+                  disabled={isLoadingTransfer || balances.length === 0}
+                  className={`group flex items-center space-x-2 px-6 py-3 rounded-xl font-medium transition-all duration-200 transform ${
+                    isLoadingTransfer || balances.length === 0
+                      ? 'bg-indigo-400 cursor-not-allowed' 
+                      : 'bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 hover:scale-105 hover:shadow-lg'
+                  } text-white shadow-md`}
+                >
+                  {isLoadingTransfer ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <Repeat className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
+                  )}
+                  <span>{isLoadingTransfer ? 'Transfiriendo...' : 'Transferir Dinero'}</span>
                 </button>
               </div>
             </div>
@@ -2182,6 +2319,125 @@ export default function Dashboard() {
                   <button
                     type="button"
                     onClick={closeRecurringModal}
+                    className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Transfer Modal */}
+        {showTransferModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md">
+              <h3 className="text-lg font-semibold mb-4 flex items-center">
+                <Repeat className="h-5 w-5 mr-2 text-indigo-600" />
+                Transferir Dinero Entre Balances
+              </h3>
+              <form onSubmit={processTransfer}>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Desde (Balance Origen)
+                    </label>
+                    <select
+                      value={transferData.fromBalance}
+                      onChange={(e) => setTransferData({...transferData, fromBalance: e.target.value})}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    >
+                      <option value="principal">💼 Balance Principal</option>
+                      {balancesWithCurrentAmount.map(balance => (
+                        <option key={balance.id} value={balance.id}>
+                          {balance.type === 'savings' ? '🐷' : balance.type === 'debt' ? '⚠️' : '💰'} {balance.name} ({formatCurrency(balance.currentAmount || 0)})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Hacia (Balance Destino)
+                    </label>
+                    <select
+                      value={transferData.toBalance}
+                      onChange={(e) => setTransferData({...transferData, toBalance: e.target.value})}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      required
+                    >
+                      <option value="">Seleccionar balance destino</option>
+                      {transferData.fromBalance !== 'principal' && (
+                        <option value="principal">💼 Balance Principal</option>
+                      )}
+                      {balancesWithCurrentAmount
+                        .filter(balance => balance.id !== transferData.fromBalance)
+                        .map(balance => (
+                          <option key={balance.id} value={balance.id}>
+                            {balance.type === 'savings' ? '🐷' : balance.type === 'debt' ? '⚠️' : '💰'} {balance.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Monto a Transferir (COP)
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      value={transferData.amount}
+                      onChange={(e) => setTransferData({...transferData, amount: e.target.value})}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      placeholder="0"
+                      required
+                    />
+                    {transferData.fromBalance && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Disponible: {formatCurrency(
+                          transferData.fromBalance === 'principal' 
+                            ? balance 
+                            : balancesWithCurrentAmount.find(b => b.id === transferData.fromBalance)?.currentAmount || 0
+                        )}
+                      </p>
+                    )}
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Descripción de la Transferencia
+                    </label>
+                    <input
+                      type="text"
+                      value={transferData.description}
+                      onChange={(e) => setTransferData({...transferData, description: e.target.value})}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      placeholder="Ej: Ahorro mensual, Pago de deuda, etc."
+                      required
+                    />
+                  </div>
+                </div>
+                
+                <div className="flex space-x-3 mt-6">
+                  <button
+                    type="submit"
+                    disabled={isLoadingTransfer}
+                    className={`flex-1 flex items-center justify-center space-x-2 text-white py-2 px-4 rounded-lg transition-colors ${
+                      isLoadingTransfer 
+                        ? 'bg-indigo-400 cursor-not-allowed' 
+                        : 'bg-indigo-600 hover:bg-indigo-700'
+                    }`}
+                  >
+                    {isLoadingTransfer && <Loader2 className="h-4 w-4 animate-spin" />}
+                    <span>
+                      {isLoadingTransfer ? 'Transfiriendo...' : 'Realizar Transferencia'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeTransferModal}
                     className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400"
                   >
                     Cancelar
