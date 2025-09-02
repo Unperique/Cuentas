@@ -560,7 +560,7 @@ export default function Dashboard() {
 
     return {
       ...balance,
-      currentAmount: Math.max(0, currentAmount) // No permitir valores negativos para ahorros
+      currentAmount: currentAmount 
     };
   });
 
