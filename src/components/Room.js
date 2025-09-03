@@ -41,6 +41,20 @@ function formatCurrency(amount) {
   }).format(amount);
 }
 
+// Formatea un número a string con separador de miles (sin símbolo de moneda)
+function formatNumberThousands(value) {
+  if (value === '' || value === null || value === undefined) return '';
+  const num = Number(value.toString().replace(/\D/g, ''));
+  if (isNaN(num)) return '';
+  return num.toLocaleString('es-CO');
+}
+
+// Quita separadores de miles y retorna número puro
+function parseNumberThousands(value) {
+  if (typeof value !== 'string') return value;
+  return value.replace(/\./g, '').replace(/,/g, '');
+}
+
 export default function Room() {
   const { roomId } = useParams();
   const { currentUser } = useAuth();
@@ -199,6 +213,7 @@ export default function Room() {
   }
 
   function openAccountsModal(member) {
+    console.log('Abriendo modal de cuentas para:', member);
     setSelectedMember(member);
     setShowAccountsModal(true);
   }
@@ -333,7 +348,7 @@ export default function Room() {
         return total + (expense.memberShares?.[memberId] || 1);
       }, 0);
       
-      const amountPerShare = amount / totalShares;
+      const amountPerShare = totalShares > 0 ? amount / totalShares : 0;
 
       // Quien pagó recibe crédito por el monto total
       if (debts[paidBy] !== undefined) {
@@ -358,40 +373,80 @@ export default function Room() {
       member: members.find(m => m.id === memberId)
     }));
 
+    // Debug log para verificar cálculos
+    console.log('Cálculo de deudas:', {
+      expenses: expenses.map(e => ({ 
+        id: e.id, 
+        amount: e.amount, 
+        paidBy: e.paidBy, 
+        splitBetween: e.splitBetween,
+        memberShares: e.memberShares 
+      })),
+      members: members.map(m => ({ id: m.id, displayName: m.displayName })),
+      result
+    });
+
     return result;
   }
 
   function calculateIndividualDebts() {
-    const debts = calculateDebts();
-    const individualDebts = [];
-
-    // Separar quienes deben dinero y quienes deben recibir
-    const debtors = debts.filter(debt => debt.balance < 0);
-    const creditors = debts.filter(debt => debt.balance > 0);
-
-    // Calcular deudas individuales
-    debtors.forEach(debtor => {
-      const amountOwed = Math.abs(debtor.balance);
-      let remainingDebt = amountOwed;
-
-      creditors.forEach(creditor => {
-        if (remainingDebt > 0 && creditor.balance > 0) {
-          const paymentAmount = Math.min(remainingDebt, creditor.balance);
+    // Calcular deudas directamente desde los gastos
+    const debtMap = {}; // { fromId-toId: amount }
+    
+    expenses.forEach(expense => {
+      const paidBy = expense.paidBy;
+      const amount = parseFloat(expense.amount) || 0;
+      
+      if (!expense.splitBetween || !Array.isArray(expense.splitBetween)) return;
+      
+      // Calcular el total de participaciones para este gasto
+      const totalShares = expense.splitBetween.reduce((total, memberId) => {
+        return total + (expense.memberShares?.[memberId] || 1);
+      }, 0);
+      
+      const amountPerShare = totalShares > 0 ? amount / totalShares : 0;
+      
+      // Para cada participante que no sea quien pagó
+      expense.splitBetween.forEach(memberId => {
+        if (memberId !== paidBy) {
+          const shares = expense.memberShares?.[memberId] || 1;
+          const personalDebt = amountPerShare * shares;
           
-          if (paymentAmount > 0) {
-            individualDebts.push({
-              from: debtor.member?.displayName || 'Usuario',
-              fromId: debtor.memberId,
-              to: creditor.member?.displayName || 'Usuario',
-              toId: creditor.memberId,
-              amount: paymentAmount
-            });
-
-            remainingDebt -= paymentAmount;
-            creditor.balance -= paymentAmount;
+          if (personalDebt > 0.01) {
+            const key = `${memberId}-${paidBy}`;
+            debtMap[key] = (debtMap[key] || 0) + personalDebt;
           }
         }
       });
+    });
+
+    // Convertir el mapa a array de deudas individuales
+    const individualDebts = Object.entries(debtMap).map(([key, amount]) => {
+      const [fromId, toId] = key.split('-');
+      const fromMember = members.find(m => m.id === fromId);
+      const toMember = members.find(m => m.id === toId);
+      
+      return {
+        from: fromMember?.displayName || 'Usuario',
+        fromId: fromId,
+        to: toMember?.displayName || 'Usuario',
+        toId: toId,
+        amount: parseFloat(amount.toFixed(2))
+      };
+    });
+
+    // Debug log para verificar asignación de deudas
+    console.log('Deudas individuales calculadas desde gastos:', {
+      expenses: expenses.map(e => ({ 
+        id: e.id, 
+        description: e.description,
+        amount: e.amount, 
+        paidBy: e.paidBy, 
+        splitBetween: e.splitBetween,
+        memberShares: e.memberShares 
+      })),
+      debtMap,
+      individualDebts
     });
 
     return individualDebts;
@@ -621,22 +676,20 @@ export default function Room() {
                           </div>
                         )}
                         
-                        {/* Botón para editar cuentas */}
-                        <div className="mt-2 flex justify-end">
-                          <button
-                            onClick={() => openAccountsModal(member)}
-                            className="text-xs text-blue-600 hover:text-blue-800 flex items-center space-x-1"
-                            disabled={memberId !== currentUser.uid}
-                          >
-                            <User className="h-3 w-3" />
-                            <span>
-                              {memberId === currentUser.uid 
-                                ? (userAccounts[memberId]?.length > 0 ? 'Editar cuentas' : 'Agregar cuentas')
-                                : 'Ver cuentas'
-                              }
-                            </span>
-                          </button>
-                        </div>
+                        {/* Botón para editar cuentas - solo para el usuario actual */}
+                        {memberId === currentUser.uid && (
+                          <div className="mt-2 flex justify-end">
+                            <button
+                              onClick={() => openAccountsModal(member)}
+                              className="text-xs text-blue-600 hover:text-blue-800 flex items-center space-x-1"
+                            >
+                              <User className="h-3 w-3" />
+                              <span>
+                                {userAccounts[memberId]?.length > 0 ? 'Editar cuentas' : 'Agregar cuentas'}
+                              </span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -657,18 +710,6 @@ export default function Room() {
                               <span className="text-sm font-semibold text-red-600">
                                 {formatCurrency(debt.amount)}
                               </span>
-                              {userAccounts[debt.toId] && userAccounts[debt.toId].length > 0 && (
-                                <button
-                                  onClick={() => {
-                                    const member = members.find(m => m.id === debt.toId);
-                                    openAccountsModal(member);
-                                  }}
-                                  className="text-xs text-blue-600 hover:text-blue-800"
-                                  title="Ver cuentas para pagar"
-                                >
-                                  <User className="h-3 w-3" />
-                                </button>
-                              )}
                             </div>
                           </div>
                         </div>
@@ -714,12 +755,17 @@ export default function Room() {
                       Monto
                     </label>
                     <input
-                      type="number"
-                      step="0.01"
-                      value={newExpense.amount}
-                      onChange={(e) => setNewExpense({...newExpense, amount: e.target.value})}
+                      type="text"
+                      inputMode="numeric"
+                      value={formatNumberThousands(newExpense.amount)}
+                      onChange={e => {
+                        const raw = parseNumberThousands(e.target.value);
+                        if (/^\d*$/.test(raw)) {
+                          setNewExpense({ ...newExpense, amount: raw });
+                        }
+                      }}
                       className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="0.00"
+                      placeholder="0"
                       required
                     />
                   </div>
@@ -831,10 +877,20 @@ export default function Room() {
         {/* Expense Details/Edit Modal */}
         {showExpenseModal && selectedExpense && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-96 overflow-y-auto">
-              <h3 className="text-lg font-semibold mb-4">
-                {editingExpense ? 'Editar Gasto' : 'Detalles del Gasto'}
-              </h3>
+            <div className="bg-white rounded-lg p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold">
+                  {editingExpense ? 'Editar Gasto' : 'Detalles del Gasto'}
+                </h3>
+                <button
+                  onClick={closeExpenseModal}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
               
               {editingExpense ? (
                 /* Modo Edición */
@@ -858,15 +914,20 @@ export default function Room() {
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Monto
                       </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={editingExpense.amount}
-                        onChange={(e) => setEditingExpense({...editingExpense, amount: e.target.value})}
-                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        placeholder="0.00"
-                        required
-                      />
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={formatNumberThousands(editingExpense.amount)}
+                          onChange={e => {
+                            const raw = parseNumberThousands(e.target.value);
+                            if (/^\d*$/.test(raw)) {
+                              setEditingExpense({ ...editingExpense, amount: raw });
+                            }
+                          }}
+                          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          placeholder="0"
+                          required
+                        />
                     </div>
                     
                     <div>
@@ -888,13 +949,18 @@ export default function Room() {
                     </div>
                     
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Dividir entre
-                      </label>
-                      <div className="space-y-3">
+                      <div className="flex justify-between items-center mb-3">
+                        <label className="block text-sm font-medium text-gray-700">
+                          Dividir entre
+                        </label>
+                        <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                          {editingExpense.splitBetween.length} persona{editingExpense.splitBetween.length !== 1 ? 's' : ''} seleccionada{editingExpense.splitBetween.length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <div className="space-y-3 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-3">
                         {members.map(member => (
-                          <div key={member.id} className="flex items-center justify-between">
-                            <label className="flex items-center">
+                          <div key={member.id} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded">
+                            <label className="flex items-center flex-1">
                               <input
                                 type="checkbox"
                                 checked={editingExpense.splitBetween.includes(member.id)}
@@ -902,18 +968,25 @@ export default function Room() {
                                   const updated = e.target.checked
                                     ? [...editingExpense.splitBetween, member.id]
                                     : editingExpense.splitBetween.filter(id => id !== member.id);
-                                  setEditingExpense({...editingExpense, splitBetween: updated});
                                   
                                   // Limpiar participaciones si se deselecciona
+                                  const newMemberShares = { ...editingExpense.memberShares };
                                   if (!e.target.checked) {
-                                    const newMemberShares = { ...editingExpense.memberShares };
                                     delete newMemberShares[member.id];
-                                    setEditingExpense({...editingExpense, memberShares: newMemberShares});
+                                  } else {
+                                    // Establecer participación por defecto si se selecciona
+                                    newMemberShares[member.id] = 1;
                                   }
+                                  
+                                  setEditingExpense({
+                                    ...editingExpense, 
+                                    splitBetween: updated,
+                                    memberShares: newMemberShares
+                                  });
                                 }}
-                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 mr-3"
                               />
-                              <span className="ml-2 text-sm text-gray-700">
+                              <span className="text-sm text-gray-700 font-medium">
                                 {member.displayName || 'Usuario'}
                               </span>
                             </label>
@@ -933,7 +1006,7 @@ export default function Room() {
                                       }
                                     });
                                   }}
-                                  className="text-xs border border-gray-300 rounded px-2 py-1"
+                                  className="text-sm border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                 >
                                   <option value={1}>1x</option>
                                   <option value={2}>2x</option>
@@ -1104,9 +1177,19 @@ function AccountsModal({ member, accounts, onSave, onClose, isOwner }) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-96 overflow-y-auto">
-        <h3 className="text-lg font-semibold mb-4">
-          {isOwner ? 'Mis Cuentas' : `Cuentas de ${member.displayName || 'Usuario'}`}
-        </h3>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-semibold">
+            {isOwner ? 'Mis Cuentas' : `Cuentas de ${member.displayName || 'Usuario'}`}
+          </h3>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
         
         {isOwner ? (
           <div className="space-y-4">
@@ -1116,15 +1199,41 @@ function AccountsModal({ member, accounts, onSave, onClose, isOwner }) {
                   <select
                     value={account.type}
                     onChange={(e) => updateAccount(index, 'type', e.target.value)}
-                    className="w-full p-2 border border-gray-300 rounded text-sm"
+                    className="w-full p-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="">Seleccionar tipo</option>
-                    <option value="Banco">Banco</option>
-                    <option value="PayPal">PayPal</option>
-                    <option value="Venmo">Venmo</option>
-                    <option value="Zelle">Zelle</option>
-                    <option value="CashApp">CashApp</option>
-                    <option value="Bizum">Bizum</option>
+                    <optgroup label="Bancos Colombianas">
+                      <option value="Bancolombia">Bancolombia</option>
+                      <option value="BBVA Colombia">BBVA Colombia</option>
+                      <option value="Davivienda">Davivienda</option>
+                      <option value="Colpatria">Colpatria</option>
+                      <option value="Scotiabank Colpatria">Scotiabank Colpatria</option>
+                      <option value="Citibank Colombia">Citibank Colombia</option>
+                      <option value="HSBC Colombia">HSBC Colombia</option>
+                      <option value="Banco de Bogotá">Banco de Bogotá</option>
+                      <option value="Banco Popular">Banco Popular</option>
+                      <option value="Banco AV Villas">Banco AV Villas</option>
+                      <option value="Banco Caja Social">Banco Caja Social</option>
+                      <option value="Banco Falabella">Banco Falabella</option>
+                      <option value="Banco Pichincha">Banco Pichincha</option>
+                      <option value="Banco Santander">Banco Santander</option>
+                      <option value="Banco Agrario">Banco Agrario</option>
+                      <option value="Banco Cooperativo Coopcentral">Banco Cooperativo Coopcentral</option>
+                    </optgroup>
+                    <optgroup label="Billeteras Digitales">
+                      <option value="Nequi">Nequi</option>
+                      <option value="Daviplata">Daviplata</option>
+                      <option value="Movii">Movii</option>
+                      <option value="Lulo Bank">Lulo Bank</option>
+                      <option value="RappiPay">RappiPay</option>
+                    </optgroup>
+                    <optgroup label="Internacionales">
+                      <option value="PayPal">PayPal</option>
+                      <option value="Wise">Wise</option>
+                      <option value="Remitly">Remitly</option>
+                      <option value="Western Union">Western Union</option>
+                    </optgroup>
+                    <option value="Efectivo">Efectivo</option>
                     <option value="Otro">Otro</option>
                   </select>
                   
@@ -1132,8 +1241,14 @@ function AccountsModal({ member, accounts, onSave, onClose, isOwner }) {
                     type="text"
                     value={account.info}
                     onChange={(e) => updateAccount(index, 'info', e.target.value)}
-                    placeholder="Número de cuenta, email, etc."
-                    className="w-full p-2 border border-gray-300 rounded text-sm"
+                    placeholder={
+                      account.type.includes('Banco') ? "Número de cuenta bancaria" :
+                      account.type === 'Nequi' || account.type === 'Daviplata' || account.type === 'Movii' ? "Número de celular" :
+                      account.type === 'PayPal' ? "Email de PayPal" :
+                      account.type === 'Efectivo' ? "Descripción (ej: Efectivo en mano)" :
+                      "Información de la cuenta"
+                    }
+                    className="w-full p-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                   
                   <button
@@ -1172,17 +1287,30 @@ function AccountsModal({ member, accounts, onSave, onClose, isOwner }) {
           <div className="space-y-4">
             {accounts.length > 0 ? (
               accounts.map((account, index) => (
-                <div key={index} className="border rounded-lg p-3 bg-gray-50">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm">
-                      <strong>{account.type}:</strong> {account.info}
-                    </span>
+                <div key={index} className="border rounded-lg p-4 bg-gray-50 hover:bg-gray-100 transition-colors">
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-2 mb-2">
+                        <span className="text-sm font-medium text-gray-700">
+                          {account.type}
+                        </span>
+                        <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                          {account.type.includes('Banco') ? 'Bancario' : 
+                           account.type === 'Nequi' || account.type === 'Daviplata' || account.type === 'Movii' ? 'Digital' :
+                           account.type === 'Efectivo' ? 'Físico' : 'Otro'}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-600 break-all">
+                        {account.info}
+                      </p>
+                    </div>
                     <button
                       onClick={() => {
                         navigator.clipboard.writeText(account.info);
-                        toast.success('Información copiada');
+                        toast.success('Información copiada al portapapeles');
                       }}
-                      className="text-blue-600 hover:text-blue-800"
+                      className="ml-3 p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="Copiar información"
                     >
                       <Copy className="h-4 w-4" />
                     </button>
@@ -1190,14 +1318,24 @@ function AccountsModal({ member, accounts, onSave, onClose, isOwner }) {
                 </div>
               ))
             ) : (
-              <p className="text-gray-600 text-center py-4">
-                Este usuario no ha agregado cuentas aún
-              </p>
+              <div className="text-center py-8">
+                <div className="text-gray-400 mb-2">
+                  <svg className="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                  </svg>
+                </div>
+                <p className="text-gray-600 mb-1">
+                  Este usuario no ha agregado cuentas aún
+                </p>
+                <p className="text-sm text-gray-500">
+                  Las cuentas permiten recibir pagos de manera más fácil
+                </p>
+              </div>
             )}
             
             <button
               onClick={onClose}
-              className="w-full bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400"
+              className="w-full bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition-colors"
             >
               Cerrar
             </button>
