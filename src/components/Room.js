@@ -213,7 +213,6 @@ export default function Room() {
   }
 
   function openAccountsModal(member) {
-    console.log('Abriendo modal de cuentas para:', member);
     setSelectedMember(member);
     setShowAccountsModal(true);
   }
@@ -373,18 +372,7 @@ export default function Room() {
       member: members.find(m => m.id === memberId)
     }));
 
-    // Debug log para verificar cálculos
-    console.log('Cálculo de deudas:', {
-      expenses: expenses.map(e => ({ 
-        id: e.id, 
-        amount: e.amount, 
-        paidBy: e.paidBy, 
-        splitBetween: e.splitBetween,
-        memberShares: e.memberShares 
-      })),
-      members: members.map(m => ({ id: m.id, displayName: m.displayName })),
-      result
-    });
+
 
     return result;
   }
@@ -435,19 +423,7 @@ export default function Room() {
       };
     });
 
-    // Debug log para verificar asignación de deudas
-    console.log('Deudas individuales calculadas desde gastos:', {
-      expenses: expenses.map(e => ({ 
-        id: e.id, 
-        description: e.description,
-        amount: e.amount, 
-        paidBy: e.paidBy, 
-        splitBetween: e.splitBetween,
-        memberShares: e.memberShares 
-      })),
-      debtMap,
-      individualDebts
-    });
+
 
     return individualDebts;
   }

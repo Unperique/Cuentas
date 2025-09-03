@@ -6,9 +6,6 @@ import {
   Users, 
   DollarSign, 
   LogOut, 
-  Copy, 
-  Check,
-  Settings,
   Home,
   Trash2,
   User,
@@ -20,7 +17,6 @@ import {
   Calendar,
   CreditCard,
   Banknote,
-  Gift,
   Edit3,
   Target,
   PiggyBank,
@@ -31,7 +27,8 @@ import {
   Repeat,
   Clock,
   Zap,
-  ArrowLeftRight
+  ArrowLeftRight,
+  X
 } from 'lucide-react';
 import { 
   collection, 
@@ -205,11 +202,24 @@ export default function Dashboard() {
   const [isLoadingTransfer, setIsLoadingTransfer] = useState(false);
   const [isLoadingCardOperation, setIsLoadingCardOperation] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+  
+  // Estado para alertas personalizadas
+  const [customAlert, setCustomAlert] = useState({
+    show: false,
+    title: '',
+    message: '',
+    type: 'confirm', // 'confirm', 'info', 'warning', 'error'
+    onConfirm: null,
+    onCancel: null,
+    confirmText: 'Aceptar',
+    cancelText: 'Cancelar'
+  });
   const [cardData, setCardData] = useState({
     bank: '',
     type: 'credit',
     lastFourDigits: '',
-    nickname: ''
+    nickname: '',
+    creditLimit: ''
   });
   
           // Transaction form data
@@ -240,29 +250,30 @@ export default function Dashboard() {
     amount: '',
     category: '',
     paymentMethod: 'efectivo',
-     frequency: 'monthly',
-     dayOfMonth: '1',
-     isActive: true,
-     selectedCard: ''
-   });
+    balance: 'principal',
+    frequency: 'monthly', // 'monthly', 'weekly', 'daily'
+    dayOfMonth: 1, // día del mes para ejecutar
+    isActive: true,
+    selectedCard: ''
+  });
 
-  // Profile form data
+  const [isLoadingRoom, setIsLoadingRoom] = useState(false);
+  
+  // Estados para datos de formularios
+  const [abonoData, setAbonoData] = useState({
+    amount: '',
+    description: '',
+    balanceId: ''
+  });
+  
   const [profileData, setProfileData] = useState({
-    displayName: currentUser?.displayName || '',
+    displayName: '',
+    email: '',
     currentPassword: '',
     newPassword: '',
     confirmPassword: ''
   });
 
-  // Abono form data
-  const [abonoData, setAbonoData] = useState({
-    amount: '',
-    paymentMethod: 'efectivo',
-    description: '',
-    selectedCard: ''
-  });
-
-  // All useEffect hooks here
   useEffect(() => {
     if (!currentUser) return;
 
@@ -403,6 +414,12 @@ export default function Dashboard() {
       return;
     }
 
+    // Validar que si se selecciona tarjeta, se debe seleccionar una tarjeta específica
+    if (transactionData.paymentMethod === 'tarjeta' && !transactionData.selectedCard) {
+      toast.error('Por favor selecciona una tarjeta');
+      return;
+    }
+
     setIsLoadingTransaction(true);
     try {
       // Determinar si es un gasto con tarjeta de crédito
@@ -449,14 +466,22 @@ export default function Dashboard() {
   }
 
   async function deleteTransaction(transactionId) {
-    if (!window.confirm('¿Estás seguro de que quieres eliminar esta transacción?')) return;
-
-    try {
-      await deleteDoc(doc(db, 'personalTransactions', transactionId));
-      toast.success('Transacción eliminada');
-    } catch (error) {
-      toast.error('Error al eliminar la transacción');
-    }
+    showCustomAlert(
+      'Eliminar Transacción',
+      '¿Estás seguro de que quieres eliminar esta transacción?',
+      'confirm',
+      async () => {
+        try {
+          await deleteDoc(doc(db, 'personalTransactions', transactionId));
+          toast.success('Transacción eliminada');
+        } catch (error) {
+          toast.error('Error al eliminar la transacción');
+        }
+      },
+      null,
+      'Eliminar',
+      'Cancelar'
+    );
   }
 
   async function addBalance(e) {
@@ -513,20 +538,34 @@ export default function Dashboard() {
   }
 
   async function deleteBalance(balanceId) {
-    if (!window.confirm('¿Estás seguro de que quieres eliminar este balance?')) return;
-    
-    try {
-      await deleteDoc(doc(db, 'balances', balanceId));
-      toast.success('Balance eliminado');
-    } catch (error) {
-      toast.error('Error al eliminar el balance');
-    }
+    showCustomAlert(
+      'Eliminar Balance',
+      '¿Estás seguro de que quieres eliminar este balance?',
+      'confirm',
+      async () => {
+        try {
+          await deleteDoc(doc(db, 'balances', balanceId));
+          toast.success('Balance eliminado');
+        } catch (error) {
+          toast.error('Error al eliminar el balance');
+        }
+      },
+      null,
+      'Eliminar',
+      'Cancelar'
+    );
   }
 
   async function addRecurringTransaction(e) {
     e.preventDefault();
     if (!recurringData.description || !recurringData.amount || !recurringData.category) {
       toast.error('Por favor completa todos los campos');
+      return;
+    }
+
+    // Validar que si se selecciona tarjeta, se debe seleccionar una tarjeta específica
+    if (recurringData.paymentMethod === 'tarjeta' && !recurringData.selectedCard) {
+      toast.error('Por favor selecciona una tarjeta');
       return;
     }
 
@@ -565,22 +604,31 @@ export default function Dashboard() {
   }
 
   async function deleteRecurringTransaction(id) {
-    if (!window.confirm('¿Estás seguro de que quieres eliminar esta transacción automática?')) return;
-
-    try {
-      await deleteDoc(doc(db, 'recurringTransactions', id));
-      toast.success('Transacción automática eliminada');
-    } catch (error) {
-      toast.error('Error al eliminar la transacción automática');
-    }
+    showCustomAlert(
+      'Eliminar Transacción Automática',
+      '¿Estás seguro de que quieres eliminar esta transacción automática?',
+      'confirm',
+      async () => {
+        try {
+          await deleteDoc(doc(db, 'recurringTransactions', id));
+          toast.success('Transacción automática eliminada');
+        } catch (error) {
+          toast.error('Error al eliminar la transacción automática');
+        }
+      },
+      null,
+      'Eliminar',
+      'Cancelar'
+    );
   }
 
   async function handleAbono(e) {
     e.preventDefault();
-    if (!abonoData.amount || isLoadingAbono) return;
+    if (!abonoData.amount || !abonoData.balanceId || isLoadingAbono) return;
 
-    if (!selectedBalance) {
-      toast.error('No se ha seleccionado un balance para el abono');
+    const targetBalance = allBalancesWithAmounts.find(b => b.id === abonoData.balanceId);
+    if (!targetBalance) {
+      toast.error('No se ha seleccionado un balance válido para el abono');
       return;
     }
 
@@ -590,42 +638,35 @@ export default function Dashboard() {
       return;
     }
 
-    if (abonoAmount > balance) {
-      toast.error('No tienes suficiente balance general para este abono');
-      return;
-    }
-
     setIsLoadingAbono(true);
     try {
-      if (selectedBalance.type === 'future') {
+      if (targetBalance.type === 'future') {
         // Para balances futuros, solo crear un egreso asignado al balance futuro
         await addDoc(collection(db, 'personalTransactions'), {
           userId: currentUser.uid,
           type: 'expense',
-          description: abonoData.description || `Gasto futuro - ${selectedBalance.name}`,
+          description: abonoData.description || `Gasto futuro - ${targetBalance.name}`,
           amount: abonoAmount,
           category: 'Gasto Futuro',
           date: new Date().toISOString().split('T')[0],
-          paymentMethod: abonoData.paymentMethod,
-          balance: selectedBalance.id, // Asignar al balance futuro
-          selectedCard: abonoData.selectedCard || null,
+          paymentMethod: 'efectivo',
+          balance: targetBalance.id, // Asignar al balance futuro
           createdAt: serverTimestamp()
         });
         
-        toast.success(`Gasto futuro de $${formatNumberThousands(abonoAmount)} agregado a ${selectedBalance.name}`);
+        toast.success(`Gasto futuro de $${formatNumberThousands(abonoAmount)} agregado a ${targetBalance.name}`);
       } else {
         // Para otros balances (ahorro, deuda), crear transferencia
         // 1. Crear transacción de egreso desde el balance general
         await addDoc(collection(db, 'personalTransactions'), {
           userId: currentUser.uid,
           type: 'expense',
-          description: abonoData.description || `Abono a ${selectedBalance.name}`,
+          description: abonoData.description || `Abono a ${targetBalance.name}`,
           amount: abonoAmount,
           category: 'Abono/Transferencia',
           date: new Date().toISOString().split('T')[0],
-          paymentMethod: abonoData.paymentMethod,
+          paymentMethod: 'efectivo',
           balance: 'principal', // Desde balance general
-          selectedCard: abonoData.selectedCard || null,
           createdAt: serverTimestamp()
         });
 
@@ -637,9 +678,8 @@ export default function Dashboard() {
           amount: abonoAmount,
           category: 'Abono/Transferencia',
           date: new Date().toISOString().split('T')[0],
-          paymentMethod: abonoData.paymentMethod,
-          balance: selectedBalance.id,
-          selectedCard: abonoData.selectedCard || null,
+          paymentMethod: 'efectivo',
+          balance: targetBalance.id,
           createdAt: serverTimestamp()
         });
         
@@ -777,207 +817,220 @@ export default function Dashboard() {
       amount: '',
       category: '',
       paymentMethod: 'efectivo',
-       selectedCard: ''
-     });
-     setShowRecurringModal(true);
-   }
-
-  function closeRecurringModal() {
-    setShowRecurringModal(false);
-  }
-
-  function openProfileModal() {
-    setProfileData({
-      displayName: currentUser?.displayName || '',
-      currentPassword: '',
-      newPassword: '',
-      confirmPassword: ''
-    });
-    setShowProfileModal(true);
-  }
-
-  function closeProfileModal() {
-    setShowProfileModal(false);
-    setShowPasswords({
-      current: false,
-      new: false,
-      confirm: false
+      balance: 'principal'
     });
   }
 
-  function openAbonoModal(balance) {
-    setSelectedBalance(balance);
-    setAbonoData({
-      amount: '',
-      paymentMethod: 'efectivo',
-      description: '',
-      selectedCard: ''
+
+
+  async function deleteTransaction(transactionId) {
+    showCustomAlert(
+      'Eliminar Transacción',
+      '¿Estás seguro de que quieres eliminar esta transacción?',
+      'confirm',
+      async () => {
+        try {
+          await deleteDoc(doc(db, 'personalTransactions', transactionId));
+          toast.success('Transacción eliminada');
+        } catch (error) {
+          toast.error('Error al eliminar la transacción');
+        }
+      },
+      null,
+      'Eliminar',
+      'Cancelar'
+    );
+  }
+
+  // Calcular totales de cuentas personales
+  const totalIncome = personalTransactions
+    .filter(t => t.type === 'income')
+    .reduce((sum, t) => sum + (t.amount || 0), 0);
+  
+  const totalExpenses = personalTransactions
+    .filter(t => t.type === 'expense')
+    .filter(t => {
+      // Solo incluir gastos que afecten el balance inmediatamente:
+      // 1. Gastos con efectivo
+      // 2. Gastos con tarjeta de débito
+      // 3. Pagos de tarjetas de crédito
+      // 4. Gastos con tarjeta de crédito que NO sean pagos de tarjeta (estos NO se incluyen)
+      
+      if (t.paymentMethod === 'efectivo') {
+        return true; // Efectivo siempre afecta el balance
+      }
+      
+      if (t.paymentMethod === 'tarjeta' && t.selectedCard) {
+        const card = cards.find(c => c.id === t.selectedCard);
+        if (card && card.type === 'debit') {
+          return true; // Tarjeta de débito afecta el balance inmediatamente
+        }
+        if (card && card.type === 'credit') {
+          // Solo incluir si es un pago de tarjeta de crédito
+          const isPayment = t.category === 'Pago Tarjeta de Crédito';
+          if (!isPayment) {
+            // Este es un gasto con tarjeta de crédito que NO debe afectar el balance
+            return false;
+          }
+          return true;
+        }
+      }
+      
+      // Para otros casos (sin tarjeta seleccionada, etc.)
+      return true;
+    })
+    .reduce((sum, t) => sum + (t.amount || 0), 0);
+  
+  const balance = totalIncome - totalExpenses;
+
+  // Calcular totales por método de pago (solo egresos)
+  const paymentMethodTotals = personalTransactions
+    .filter(t => t.type === 'expense')
+    .filter(t => {
+      // Solo incluir gastos que afecten el balance inmediatamente:
+      // 1. Gastos con efectivo
+      // 2. Gastos con tarjeta de débito
+      // 3. Pagos de tarjetas de crédito
+      // 4. Gastos con tarjeta de crédito que NO sean pagos de tarjeta (estos NO se incluyen)
+      
+      if (t.paymentMethod === 'efectivo') {
+        return true; // Efectivo siempre afecta el balance
+      }
+      
+      if (t.paymentMethod === 'tarjeta' && t.selectedCard) {
+        const card = cards.find(c => c.id === t.selectedCard);
+        if (card && card.type === 'debit') {
+          return true; // Tarjeta de débito afecta el balance inmediatamente
+        }
+        if (card && card.type === 'credit') {
+          // Solo incluir si es un pago de tarjeta de crédito
+          const isPayment = t.category === 'Pago Tarjeta de Crédito';
+          if (!isPayment) {
+            // Este es un gasto con tarjeta de crédito que NO debe afectar el balance
+            return false;
+          }
+          return true;
+        }
+      }
+      
+      // Para otros casos (sin tarjeta seleccionada, etc.)
+      return true;
+    })
+    .reduce((totals, t) => {
+      const method = t.paymentMethod || 'efectivo';
+      totals[method] = (totals[method] || 0) + (t.amount || 0);
+      return totals;
+    }, {});
+
+  // Filtrado de transacciones recurrentes
+  const filteredRecurringTransactions = recurringTransactions.filter(transaction => {
+    if (recurringFilter === 'all') return true;
+    return transaction.type === recurringFilter;
+  });
+
+  const goToPage = (page) => {
+    setCurrentPage(page);
+  };
+
+  const goToPreviousPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+    }
+  };
+
+  const goToNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+    }
+  };
+
+  // Funciones para alertas personalizadas
+  const showCustomAlert = (title, message, type = 'confirm', onConfirm = null, onCancel = null, confirmText = 'Aceptar', cancelText = 'Cancelar') => {
+    setCustomAlert({
+      show: true,
+      title,
+      message,
+      type,
+      onConfirm,
+      onCancel,
+      confirmText,
+      cancelText
     });
-    setShowAbonoModal(true);
-  }
+  };
 
-  function closeAbonoModal() {
-    setShowAbonoModal(false);
-    setSelectedBalance(null);
-    setIsLoadingAbono(false);
-  }
+  const hideCustomAlert = () => {
+    setCustomAlert({
+      show: false,
+      title: '',
+      message: '',
+      type: 'confirm',
+      onConfirm: null,
+      onCancel: null,
+      confirmText: 'Aceptar',
+      cancelText: 'Cancelar'
+    });
+  };
 
-  function setRecentFilterAndResetPage(filter) {
+  const handleAlertConfirm = () => {
+    if (customAlert.onConfirm) {
+      customAlert.onConfirm();
+    }
+    hideCustomAlert();
+  };
+
+  const handleAlertCancel = () => {
+    if (customAlert.onCancel) {
+      customAlert.onCancel();
+    }
+    hideCustomAlert();
+  };
+
+  // Funciones para cambiar filtros (resetea paginación)
+  const setRecurringFilterAndResetPage = (filter) => {
+    setRecurringFilter(filter);
+  };
+
+  const setRecentFilterAndResetPage = (filter) => {
     setRecentFilter(filter);
-    setCurrentPage(1);
+    setCurrentPage(1); // Reset pagination when filter changes
+  };
+
+  // Funciones para manejar balances/bolsillos
+  function openBalanceModal(balance = null) {
+    // Validación más robusta para determinar si es modo edición
+    const isEditMode = balance && balance.id && typeof balance === 'object';
     
-    // Resetear filtro de método de pago si se selecciona "Solo Ingresos"
-    if (filter === 'income') {
-      setPaymentMethodFilter('all');
-    }
-  }
-
-  function setDateFilterAndResetPage(filter) {
-    setDateFilter(filter);
-    setCurrentPage(1);
-    
-    // Establecer fechas por defecto según el filtro
-    const today = new Date();
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    const startOfWeek = new Date(today);
-    startOfWeek.setDate(today.getDate() - today.getDay());
-    const startOfYear = new Date(today.getFullYear(), 0, 1);
-    
-    switch (filter) {
-      case 'today':
-        setStartDate(getLocalDateString(today));
-        setEndDate(getLocalDateString(today));
-        break;
-      case 'week':
-        setStartDate(getLocalDateString(startOfWeek));
-        setEndDate(getLocalDateString(today));
-        break;
-      case 'month':
-        setStartDate(getLocalDateString(startOfMonth));
-        setEndDate(getLocalDateString(today));
-        break;
-      case 'year':
-        setStartDate(getLocalDateString(startOfYear));
-        setEndDate(getLocalDateString(today));
-        break;
-      case 'custom':
-        // No establecer fechas automáticamente para filtro personalizado
-        break;
-      default:
-        setStartDate('');
-        setEndDate('');
-    }
-  }
-
-  function setPaymentMethodFilterAndResetPage(filter) {
-    setPaymentMethodFilter(filter);
-    setCurrentPage(1);
-  }
-
-  async function joinRoom(e) {
-    e.preventDefault();
-    if (!roomCode.trim()) {
-      toast.error('Por favor ingresa un código de sala');
-      return;
-    }
-
-    try {
-      // Buscar la sala por código
-      const roomsQuery = query(
-        collection(db, 'rooms'),
-        where('code', '==', roomCode.trim().toUpperCase())
-      );
-      
-      const querySnapshot = await getDocs(roomsQuery);
-      
-      if (querySnapshot.empty) {
-        toast.error('No se encontró una sala con ese código');
-        return;
-      }
-
-      const roomDoc = querySnapshot.docs[0];
-      const roomData = roomDoc.data();
-      
-      // Verificar si el usuario ya es miembro
-      if (roomData.members && roomData.members.includes(currentUser.uid)) {
-        toast.error('Ya eres miembro de esta sala');
-        return;
-      }
-
-      // Agregar el usuario a la sala
-      await updateDoc(doc(db, 'rooms', roomDoc.id), {
-        members: [...(roomData.members || []), currentUser.uid]
+    if (isEditMode) {
+      // Modo edición
+      setEditingBalance(balance);
+      setBalanceData({
+        name: balance.name || '',
+        type: balance.type || 'savings',
+        description: balance.description || '',
+        goal: balance.goal || ''
       });
-
-      toast.success(`Te has unido a la sala "${roomData.name}"`);
-      setShowJoinRoomModal(false);
-      setRoomCode('');
-    } catch (error) {
-      console.error('Error al unirse a la sala:', error);
-      toast.error('Error al unirse a la sala');
-    }
-  }
-
-  async function createRoom(e) {
-    e.preventDefault();
-    if (!newRoomData.name.trim()) {
-      toast.error('Por favor ingresa un nombre para la sala');
-      return;
-    }
-
-    try {
-      // Generar código único para la sala
-      const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-      
-      await addDoc(collection(db, 'rooms'), {
-        name: newRoomData.name.trim(),
-        description: newRoomData.description.trim(),
-        code: code,
-        members: [currentUser.uid],
-        createdBy: currentUser.uid,
-        createdAt: serverTimestamp()
+    } else { 
+      // Modo creación
+      setEditingBalance(null);
+      setBalanceData({
+        name: '',
+        type: 'savings',
+        description: '',
+        goal: ''
       });
-
-      toast.success(`Sala "${newRoomData.name}" creada exitosamente`);
-      setShowCreateRoomModal(false);
-      setNewRoomData({ name: '', description: '' });
-    } catch (error) {
-      console.error('Error al crear la sala:', error);
-      toast.error('Error al crear la sala');
     }
+    setShowBalanceModal(true);
   }
 
-  async function createFutureBalance(e) {
-    e.preventDefault();
-    if (!futureBalanceData.name.trim()) {
-      toast.error('Por favor ingresa un nombre para el balance futuro');
-      return;
-    }
-
-    if (!futureBalanceData.targetMonth) {
-      toast.error('Por favor selecciona el mes objetivo');
-      return;
-    }
-
-    try {
-        await addDoc(collection(db, 'balances'), {
-          userId: currentUser.uid,
-        name: futureBalanceData.name.trim(),
-        type: 'future',
-        description: futureBalanceData.description.trim(),
-        targetMonth: futureBalanceData.targetMonth,
-          currentAmount: 0,
-        goal: null,
-          createdAt: serverTimestamp()
-        });
-
-      toast.success(`Balance futuro "${futureBalanceData.name}" creado exitosamente`);
-      setShowFutureBalanceModal(false);
-      setFutureBalanceData({ name: '', description: '', targetMonth: '' });
-    } catch (error) {
-      console.error('Error al crear el balance futuro:', error);
-      toast.error('Error al crear el balance futuro');
-    }
+  function closeBalanceModal() {
+    setShowBalanceModal(false);
+    setEditingBalance(null);
+    setBalanceData({
+      name: '',
+      type: 'savings',
+      description: '',
+      goal: ''
+    });
   }
 
   async function addCard(e) {
@@ -996,6 +1049,7 @@ export default function Dashboard() {
           type: cardData.type,
           lastFourDigits: cardData.lastFourDigits.trim(),
           nickname: cardData.nickname.trim(),
+          creditLimit: cardData.creditLimit || '',
           updatedAt: serverTimestamp()
         });
         toast.success(`Tarjeta "${cardData.nickname}" actualizada exitosamente`);
@@ -1007,6 +1061,7 @@ export default function Dashboard() {
           type: cardData.type,
           lastFourDigits: cardData.lastFourDigits.trim(),
           nickname: cardData.nickname.trim(),
+          creditLimit: cardData.creditLimit || '',
           createdAt: serverTimestamp()
         });
         toast.success(`Tarjeta "${cardData.nickname}" agregada exitosamente`);
@@ -1014,7 +1069,7 @@ export default function Dashboard() {
 
       setShowCardsModal(false);
       setEditingCard(null);
-      setCardData({ bank: '', type: 'credit', lastFourDigits: '', nickname: '' });
+      setCardData({ bank: '', type: 'credit', lastFourDigits: '', nickname: '', creditLimit: '' });
     } catch (error) {
       console.error('Error al procesar la tarjeta:', error);
       toast.error(editingCard ? 'Error al actualizar la tarjeta' : 'Error al agregar la tarjeta');
@@ -1029,7 +1084,8 @@ export default function Dashboard() {
       bank: card.bank,
       type: card.type,
       lastFourDigits: card.lastFourDigits,
-      nickname: card.nickname
+      nickname: card.nickname,
+      creditLimit: card.creditLimit || ''
     });
     setShowCardsModal(true);
   }
@@ -1072,6 +1128,86 @@ export default function Dashboard() {
     });
   }
 
+  function closeRecurringModal() {
+    setShowRecurringModal(false);
+    setRecurringData({
+      type: 'income',
+      amount: '',
+      description: '',
+      category: '',
+      paymentMethod: 'efectivo',
+      balance: 'principal',
+      frequency: 'monthly',
+      dayOfMonth: 1,
+      isActive: true
+    });
+  }
+
+  function closeAbonoModal() {
+    setShowAbonoModal(false);
+    setAbonoData({
+      amount: '',
+      description: '',
+      balanceId: ''
+    });
+  }
+
+  function closeProfileModal() {
+    setShowProfileModal(false);
+    setProfileData({
+      displayName: '',
+      email: '',
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: ''
+    });
+  }
+
+  function openProfileModal() {
+    setShowProfileModal(true);
+    setProfileData({
+      displayName: currentUser.displayName || '',
+      email: currentUser.email || '',
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: ''
+    });
+  }
+
+  function openAbonoModal(balance) {
+    setShowAbonoModal(true);
+    setAbonoData({
+      amount: '',
+      description: '',
+      balanceId: balance.id
+    });
+  }
+
+  function openCardsModal() {
+    setShowCardsModal(true);
+  }
+
+  function closeCardsModal() {
+    setShowCardsModal(false);
+    setCardData({
+      bank: '',
+      type: 'credit',
+      nickname: '',
+      lastFourDigits: ''
+    });
+    setEditingCard(null);
+  }
+
+  function setDateFilterAndResetPage(filter) {
+    setDateFilter(filter);
+    setCurrentPage(1);
+  }
+
+  function setPaymentMethodFilterAndResetPage(filter) {
+    setPaymentMethodFilter(filter);
+    setCurrentPage(1);
+  }
+
   function getBalanceAmount(balanceId) {
     const balance = balances.find(b => b.id === balanceId);
     if (!balance) return 0;
@@ -1096,24 +1232,110 @@ export default function Dashboard() {
       
       const totalExpenses = balanceTransactions
         .filter(transaction => transaction.type === 'expense')
+        .filter(transaction => {
+          // Solo incluir gastos que afecten el balance inmediatamente:
+          // 1. Gastos con efectivo
+          // 2. Gastos con tarjeta de débito
+          // 3. Pagos de tarjetas de crédito
+          // 4. Gastos con tarjeta de crédito que NO sean pagos de tarjeta (estos NO se incluyen)
+          
+          if (transaction.paymentMethod === 'efectivo') {
+            return true; // Efectivo siempre afecta el balance
+          }
+          
+          if (transaction.paymentMethod === 'tarjeta' && transaction.selectedCard) {
+            const card = cards.find(c => c.id === transaction.selectedCard);
+            if (card && card.type === 'debit') {
+              return true; // Tarjeta de débito afecta el balance inmediatamente
+            }
+            if (card && card.type === 'credit') {
+              // Solo incluir si es un pago de tarjeta de crédito
+              const isPayment = transaction.category === 'Pago Tarjeta de Crédito';
+              if (!isPayment) {
+                // Este es un gasto con tarjeta de crédito que NO debe afectar el balance
+                return false;
+              }
+              return true;
+            }
+          }
+          
+          // Para otros casos (sin tarjeta seleccionada, etc.)
+          return true;
+        })
         .reduce((sum, transaction) => sum + (transaction.amount || 0), 0);
       
       return totalIncome - totalExpenses;
     }
   }
 
-  async function deleteCard(cardId) {
-    if (!window.confirm('¿Estás seguro de que quieres eliminar esta tarjeta?')) return;
+  function getCreditCardPendingAmount(cardId) {
+    const card = cards.find(c => c.id === cardId);
+    if (!card || card.type !== 'credit') return 0;
+
+    // Gastos con esta tarjeta (excluyendo pagos de tarjeta)
+    const cardExpenses = personalTransactions
+      .filter(t => t.selectedCard === cardId && t.type === 'expense' && t.category !== 'Pago Tarjeta de Crédito')
+      .reduce((sum, t) => sum + (t.amount || 0), 0);
+
+    // Pagos realizados a esta tarjeta
+    const cardPayments = personalTransactions
+      .filter(t => t.type === 'expense' && t.category === 'Pago Tarjeta de Crédito' && t.selectedCard === cardId)
+      .reduce((sum, t) => sum + (t.amount || 0), 0);
     
-    setIsLoadingCardOperation(true);
+    const pending = cardExpenses - cardPayments;
+    
+    return pending;
+  }
+
+  async function createFutureBalance(e) {
+    e.preventDefault();
+    if (!currentUser) return;
+
+    setIsLoadingBalance(true);
     try {
-      await deleteDoc(doc(db, 'cards', cardId));
-      toast.success('Tarjeta eliminada');
+      await addDoc(collection(db, 'balances'), {
+        userId: currentUser.uid,
+        name: futureBalanceData.name,
+        type: 'future',
+        targetMonth: futureBalanceData.targetMonth,
+        description: futureBalanceData.description || '',
+        createdAt: serverTimestamp()
+      });
+
+      setFutureBalanceData({
+        name: '',
+        targetMonth: '',
+        description: ''
+      });
+      setShowFutureBalanceModal(false);
+      toast.success('Balance futuro creado exitosamente');
     } catch (error) {
-      toast.error('Error al eliminar la tarjeta');
+      toast.error('Error al crear el balance futuro');
     } finally {
-      setIsLoadingCardOperation(false);
+      setIsLoadingBalance(false);
     }
+  }
+
+  async function deleteCard(cardId) {
+    showCustomAlert(
+      'Eliminar Tarjeta',
+      '¿Estás seguro de que quieres eliminar esta tarjeta?',
+      'confirm',
+      async () => {
+        setIsLoadingCardOperation(true);
+        try {
+          await deleteDoc(doc(db, 'cards', cardId));
+          toast.success('Tarjeta eliminada');
+        } catch (error) {
+          toast.error('Error al eliminar la tarjeta');
+        } finally {
+          setIsLoadingCardOperation(false);
+        }
+      },
+      null,
+      'Eliminar',
+      'Cancelar'
+    );
   }
 
   async function handleTransfer(e) {
@@ -1262,113 +1484,125 @@ export default function Dashboard() {
       await logout();
       navigate('/login');
     } catch (error) {
-      console.error('Error al cerrar sesión:', error);
-      toast.error('Error al cerrar sesión');
+      toast.error('Error al eliminar la transacción automática');
     }
   }
 
-  // Calculations
-  const totalIncome = personalTransactions
-    .filter(t => t.type === 'income')
-    .reduce((sum, t) => sum + (t.amount || 0), 0);
-  
-  // Para gastos, excluir los de tarjetas de crédito (solo contar débito, efectivo y pagos de crédito)
-  const totalExpenses = personalTransactions
-    .filter(t => {
-      if (t.type !== 'expense') return false;
-      // Si no tiene tarjeta seleccionada, es efectivo - contar
-      if (!t.selectedCard) return true;
-      // Si tiene tarjeta, verificar si es débito o si es un pago de crédito
-      const card = cards.find(c => c.id === t.selectedCard);
-      return (card && card.type === 'debit') || t.category === 'Pago Tarjeta de Crédito';
+  // Cálculos de transacciones filtradas
+  const filteredTransactions = personalTransactions
+    .filter(transaction => {
+      const typeMatch = recentFilter === 'all' || transaction.type === recentFilter;
+      
+      let dateMatch = true;
+      if (dateFilter === 'today') {
+        const today = new Date().toDateString();
+        const transactionDate = new Date(transaction.date || transaction.createdAt?.seconds * 1000).toDateString();
+        dateMatch = today === transactionDate;
+      } else if (dateFilter === 'week') {
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        const transactionDate = new Date(transaction.date || transaction.createdAt?.seconds * 1000);
+        dateMatch = transactionDate >= weekAgo;
+      } else if (dateFilter === 'month') {
+        const monthAgo = new Date();
+        monthAgo.setMonth(monthAgo.getMonth() - 1);
+        const transactionDate = new Date(transaction.date || transaction.createdAt?.seconds * 1000);
+        dateMatch = transactionDate >= monthAgo;
+      } else if (dateFilter === 'custom' && startDate && endDate) {
+        const transactionDate = new Date(transaction.date || transaction.createdAt?.seconds * 1000);
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        dateMatch = transactionDate >= start && transactionDate <= end;
+      }
+      
+      let paymentMethodMatch = true;
+      if (paymentMethodFilter !== 'all' && transaction.type === 'expense') {
+        paymentMethodMatch = transaction.paymentMethod === paymentMethodFilter;
+      }
+      
+      const passesFilter = typeMatch && dateMatch && paymentMethodMatch;
+      
+      return passesFilter;
     })
-    .reduce((sum, t) => sum + (t.amount || 0), 0);
-  
-  const balance = totalIncome - totalExpenses;
+    .sort((a, b) => {
+      // Ordenar por fecha del más reciente al más antiguo
+      const dateA = a.date ? new Date(a.date) : new Date(a.createdAt || 0);
+      const dateB = b.date ? new Date(b.date) : new Date(b.createdAt || 0);
+      return dateB - dateA;
+    });
 
-  // Función para calcular gastos por tarjeta (solo gastos reales, no pagos)
+  // Cálculos de paginación
+  const indexOfLastTransaction = currentPage * transactionsPerPage;
+  const indexOfFirstTransaction = indexOfLastTransaction - transactionsPerPage;
+  const currentTransactions = filteredTransactions.slice(indexOfFirstTransaction, indexOfLastTransaction);
+  const totalPages = Math.ceil(filteredTransactions.length / transactionsPerPage);
+
+  // Cálculos de gastos por tarjeta
   const getCardExpenses = (cardId) => {
-    if (!cardId) return 0;
     return personalTransactions
-      .filter(t => t.type === 'expense' && t.selectedCard === cardId && t.category !== 'Pago Tarjeta de Crédito')
+      .filter(t => t.selectedCard === cardId && t.type === 'expense' && t.category !== 'Pago Tarjeta de Crédito')
       .reduce((sum, t) => sum + (t.amount || 0), 0);
   };
 
-  // Función para calcular gastos pendientes de pago en tarjetas de crédito
-  const getCreditCardPendingAmount = (cardId) => {
-    if (!cardId) return 0;
-    const card = cards.find(c => c.id === cardId);
-    if (!card || card.type !== 'credit') return 0;
-    
-    // Sumar gastos de la tarjeta (excluyendo pagos)
-    const cardExpenses = personalTransactions
-      .filter(t => t.type === 'expense' && t.selectedCard === cardId && t.category !== 'Pago Tarjeta de Crédito')
-      .reduce((sum, t) => sum + (t.amount || 0), 0);
-    
-    // Sumar pagos realizados a la tarjeta
-    const cardPayments = personalTransactions
-      .filter(t => t.type === 'expense' && t.category === 'Pago Tarjeta de Crédito' && t.selectedCard === cardId)
-      .reduce((sum, t) => sum + (t.amount || 0), 0);
-    
-    const pending = cardExpenses - cardPayments;
-    
-    return pending;
-  };
+  const cardExpenses = cards.map(card => ({
+    ...card,
+    totalExpenses: getCardExpenses(card.id)
+  })).filter(card => card.totalExpenses > 0);
 
-  const paymentMethodTotals = personalTransactions
-    .filter(t => t.type === 'expense')
-    .reduce((totals, t) => {
-      const method = t.paymentMethod || 'efectivo';
-      totals[method] = (totals[method] || 0) + (t.amount || 0);
-      return totals;
-    }, {});
-
-  // Calcular gastos por tarjeta específica
-  const cardExpenses = cards.map(card => {
-    const total = personalTransactions
-      .filter(t => t.type === 'expense' && t.selectedCard === card.id && t.category !== 'Pago Tarjeta de Crédito')
-      .reduce((sum, t) => sum + (t.amount || 0), 0);
-    return {
-      ...card,
-      totalExpenses: total
-    };
-  }).filter(card => card.totalExpenses > 0);
-
+  // Cálculos de balances con montos
   const balancesWithCurrentAmount = balances.map(balance => {
     if (balance.type === 'future') {
-      // Para balances futuros, calcular el total de gastos asignados a este balance
       const futureTransactions = personalTransactions.filter(transaction => 
         transaction.type === 'expense' && 
         transaction.balance === balance.id
       );
-      
-      const futureAmount = futureTransactions.reduce((total, transaction) => 
-        total + (parseFloat(transaction.amount) || 0), 0
-      );
-      
+      const futureAmount = futureTransactions.reduce((sum, transaction) => sum + (transaction.amount || 0), 0);
       return {
         ...balance,
         currentAmount: futureAmount
       };
     } else {
-      // Para otros balances (ahorro, deuda), calcular ingresos menos egresos asignados
-      const incomeTransactions = personalTransactions.filter(transaction => 
-        transaction.type === 'income' && 
+      const balanceTransactions = personalTransactions.filter(transaction => 
         transaction.balance === balance.id
       );
       
-      const expenseTransactions = personalTransactions.filter(transaction => 
-        transaction.type === 'expense' && 
-        transaction.balance === balance.id
-      );
+      const totalIncome = balanceTransactions
+        .filter(transaction => transaction.type === 'income')
+        .reduce((sum, transaction) => sum + (transaction.amount || 0), 0);
       
-      const totalIncome = incomeTransactions.reduce((total, transaction) => 
-        total + (parseFloat(transaction.amount) || 0), 0
-      );
-      
-      const totalExpenses = expenseTransactions.reduce((total, transaction) => 
-        total + (parseFloat(transaction.amount) || 0), 0
-      );
+      const totalExpenses = balanceTransactions
+        .filter(transaction => transaction.type === 'expense')
+        .filter(transaction => {
+          // Solo incluir gastos que afecten el balance inmediatamente:
+          // 1. Gastos con efectivo
+          // 2. Gastos con tarjeta de débito
+          // 3. Pagos de tarjetas de crédito
+          // 4. Gastos con tarjeta de crédito que NO sean pagos de tarjeta (estos NO se incluyen)
+          
+          if (transaction.paymentMethod === 'efectivo') {
+            return true; // Efectivo siempre afecta el balance
+          }
+          
+          if (transaction.paymentMethod === 'tarjeta' && transaction.selectedCard) {
+            const card = cards.find(c => c.id === transaction.selectedCard);
+            if (card && card.type === 'debit') {
+              return true; // Tarjeta de débito afecta el balance inmediatamente
+            }
+            if (card && card.type === 'credit') {
+              // Solo incluir si es un pago de tarjeta de crédito
+              const isPayment = transaction.category === 'Pago Tarjeta de Crédito';
+              if (!isPayment) {
+                // Este es un gasto con tarjeta de crédito que NO debe afectar el balance
+                return false;
+              }
+              return true;
+            }
+          }
+          
+          // Para otros casos (sin tarjeta seleccionada, etc.)
+          return true;
+        })
+        .reduce((sum, transaction) => sum + (transaction.amount || 0), 0);
       
       const currentAmount = totalIncome - totalExpenses;
       
@@ -1381,58 +1615,6 @@ export default function Dashboard() {
 
   const allBalancesWithAmounts = [...balancesWithCurrentAmount];
 
-  const filteredRecurringTransactions = recurringFilter === 'all' 
-    ? recurringTransactions 
-    : recurringTransactions.filter(transaction => transaction.type === recurringFilter);
-
-  // Filtrado de transacciones
-  const filteredTransactions = personalTransactions.filter(transaction => {
-    // Filtro por tipo (ingreso/egreso)
-    const typeMatch = recentFilter === 'all' || transaction.type === recentFilter;
-    
-    // Filtro por fecha
-    let dateMatch = true;
-    if (dateFilter !== 'all' && transaction.date) {
-      const transactionDate = new Date(transaction.date);
-      
-      if (startDate && endDate) {
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        dateMatch = transactionDate >= start && transactionDate <= end;
-      }
-    }
-    
-    // Filtro por método de pago (solo para egresos)
-    let paymentMethodMatch = true;
-    if (paymentMethodFilter !== 'all' && transaction.type === 'expense') {
-      paymentMethodMatch = transaction.paymentMethod === paymentMethodFilter;
-    }
-    
-    const passesFilter = typeMatch && dateMatch && paymentMethodMatch;
-    
-    return passesFilter;
-  });
-  
-  // Paginación
-  const indexOfLastTransaction = currentPage * transactionsPerPage;
-  const indexOfFirstTransaction = indexOfLastTransaction - transactionsPerPage;
-  const currentTransactions = filteredTransactions.slice(indexOfFirstTransaction, indexOfLastTransaction);
-  const totalPages = Math.ceil(filteredTransactions.length / transactionsPerPage);
-
-  // Pantalla de carga inicial
-  if (isInitialLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Cargando Dashboard</h2>
-          <p className="text-gray-600">Obteniendo tus datos financieros...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Main return statement here
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Indicador de estado de conexión */}
@@ -1664,6 +1846,22 @@ export default function Dashboard() {
                 </button>
 
                 <button
+                  onClick={openCardsModal}
+                  className="group flex items-center space-x-2 px-6 py-3 rounded-xl font-medium transition-all duration-200 transform bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 hover:scale-105 hover:shadow-lg text-white shadow-md"
+                >
+                  <CreditCard className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
+                  <span>Mis Tarjetas</span>
+                </button>
+
+                <button
+                  onClick={() => setShowFutureBalanceModal(true)}
+                  className="group flex items-center space-x-2 px-6 py-3 rounded-xl font-medium transition-all duration-200 transform bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 hover:scale-105 hover:shadow-lg text-white shadow-md"
+                >
+                  <Calendar className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
+                  <span>Balance Futuro</span>
+                </button>
+
+                <button
                   onClick={openBalanceModal}
                   disabled={isLoadingBalance}
                   className={`group flex items-center space-x-2 px-6 py-3 rounded-xl font-medium transition-all duration-200 transform ${
@@ -1694,22 +1892,6 @@ export default function Dashboard() {
                 >
                   <Clock className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
                   <span>Egreso Automático</span>
-                </button>
-
-                <button
-                  onClick={() => setShowFutureBalanceModal(true)}
-                  className="group flex items-center space-x-2 px-6 py-3 rounded-xl font-medium bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white shadow-md hover:scale-105 hover:shadow-lg transition-all duration-200 transform"
-                >
-                  <Calendar className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
-                  <span>Balance Futuro</span>
-                </button>
-
-                <button
-                  onClick={() => setShowCardsModal(true)}
-                  className="group flex items-center space-x-2 px-6 py-3 rounded-xl font-medium bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white shadow-md hover:scale-105 hover:shadow-lg transition-all duration-200 transform"
-                >
-                  <CreditCard className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
-                  <span>Mis Tarjetas</span>
                 </button>
               </div>
             </div>
@@ -1799,6 +1981,102 @@ export default function Dashboard() {
               </div>
             )}
 
+            {/* Mis Tarjetas */}
+            {cards.length > 0 && (
+              <div className="mb-8">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                  <CreditCard className="h-5 w-5 mr-2" />
+                  Mis Tarjetas
+                </h3>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {cards.map((card) => (
+                    <div key={card.id} className={`p-6 rounded-xl shadow-lg border-2 transition-all duration-200 hover:shadow-xl hover:scale-105 ${
+                      card.type === 'credit' 
+                        ? 'bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200 hover:border-purple-300'
+                        : 'bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200 hover:border-blue-300'
+                    }`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center space-x-2">
+                          <CreditCard className={`h-5 w-5 ${card.type === 'credit' ? 'text-purple-600' : 'text-blue-600'}`} />
+                          <h4 className="font-semibold text-gray-900">{card.nickname}</h4>
+                        </div>
+                        <div className="flex items-center space-x-1">
+                          <button
+                            onClick={() => openEditCardModal(card)}
+                            className="group p-2 rounded-lg hover:bg-blue-100 transition-all duration-200 transform hover:scale-110"
+                            title="Editar tarjeta"
+                          >
+                            <Edit3 className="h-4 w-4 text-blue-600 group-hover:text-blue-700" />
+                          </button>
+                          <button
+                            onClick={() => deleteCard(card.id)}
+                            className="group p-2 rounded-lg hover:bg-red-100 transition-all duration-200 transform hover:scale-110"
+                            title="Eliminar tarjeta"
+                          >
+                            <Trash2 className="h-4 w-4 text-red-600 group-hover:text-red-700" />
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <p className="text-sm text-gray-600 mb-2">
+                        {card.bank} •••• {card.lastFourDigits}
+                      </p>
+                      
+                      <div className="flex items-center space-x-2 mb-2">
+                        <span className={`px-2 py-1 text-xs rounded-full font-medium ${
+                          card.type === 'credit' 
+                            ? 'bg-purple-200 text-purple-800' 
+                            : 'bg-blue-200 text-blue-800'
+                        }`}>
+                          {card.type === 'credit' ? 'Crédito' : 'Débito'}
+                        </span>
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-gray-600">Gasto total:</span>
+                          <span className="text-lg font-bold text-gray-900">
+                            {formatCurrency(getCardExpenses(card.id))}
+                          </span>
+                        </div>
+                        
+                        {card.type === 'credit' && card.creditLimit && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-gray-600">Límite:</span>
+                            <span className="text-sm font-medium text-purple-600">
+                              {formatCurrency(parseInt(card.creditLimit))}
+                            </span>
+                          </div>
+                        )}
+                        
+                        {card.type === 'credit' && getCreditCardPendingAmount(card.id) > 0 && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-gray-600">Pendiente:</span>
+                            <span className="text-sm font-medium text-red-600">
+                              {formatCurrency(getCreditCardPendingAmount(card.id))}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {card.type === 'credit' && (
+                        <div className="mt-3">
+                          <button
+                            onClick={() => openPayCardModal(card)}
+                            className="w-full px-3 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm font-semibold transition-colors duration-200"
+                            title="Pagar tarjeta"
+                          >
+                            Pagar
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Transacciones Recientes */}
               <div className="mb-8">
               <div className="flex justify-between items-center mb-4">
@@ -1807,40 +2085,87 @@ export default function Dashboard() {
                   Transacciones Recientes
                 </h3>
                 <div className="flex flex-wrap gap-2">
-                  <select
-                    value={recentFilter}
-                    onChange={(e) => setRecentFilterAndResetPage(e.target.value)}
-                    className="px-3 py-1 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="all">Todas</option>
-                    <option value="income">Solo Ingresos</option>
-                    <option value="expense">Solo Egresos</option>
-                  </select>
-                  
-                  <select
-                    value={dateFilter}
-                    onChange={(e) => setDateFilterAndResetPage(e.target.value)}
-                    className="px-3 py-1 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="all">Todas las fechas</option>
-                    <option value="today">Hoy</option>
-                    <option value="week">Esta semana</option>
-                    <option value="month">Este mes</option>
-                    <option value="year">Este año</option>
-                    <option value="custom">Rango personalizado</option>
-                  </select>
-                  
-                  <select
-                    value={paymentMethodFilter}
-                    onChange={(e) => setPaymentMethodFilterAndResetPage(e.target.value)}
-                    className="px-3 py-1 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    disabled={recentFilter === 'income'}
-                  >
-                    <option value="all">Todos los métodos</option>
-                    <option value="efectivo">💵 Efectivo</option>
-                    <option value="tarjeta">💳 Tarjeta</option>
-                  </select>
+                  {/* Filtro de Tipo */}
+                  <div className="relative">
+                    <select
+                      value={recentFilter}
+                      onChange={(e) => setRecentFilterAndResetPage(e.target.value)}
+                      className="appearance-none bg-white border border-gray-300 rounded-lg px-3 py-2 pr-8 text-sm text-gray-700 hover:border-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none transition-colors duration-200"
+                    >
+                      <option value="all">Todas</option>
+                      <option value="income">Solo Ingresos</option>
+                      <option value="expense">Solo Egresos</option>
+                    </select>
+                    <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+                      <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
                   </div>
+                  
+                  {/* Filtro de Fecha */}
+                  <div className="relative">
+                    <select
+                      value={dateFilter}
+                      onChange={(e) => setDateFilterAndResetPage(e.target.value)}
+                      className="appearance-none bg-white border border-gray-300 rounded-lg px-3 py-2 pr-8 text-sm text-gray-700 hover:border-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none transition-colors duration-200"
+                    >
+                      <option value="all">Todas las fechas</option>
+                      <option value="today">Hoy</option>
+                      <option value="week">Esta semana</option>
+                      <option value="month">Este mes</option>
+                      <option value="year">Este año</option>
+                      <option value="custom">Rango personalizado</option>
+                    </select>
+                    <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+                      <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </div>
+                  
+                  {/* Filtro de Método de Pago */}
+                  <div className="relative">
+                    <select
+                      value={paymentMethodFilter}
+                      onChange={(e) => setPaymentMethodFilterAndResetPage(e.target.value)}
+                      className={`appearance-none border rounded-lg px-3 py-2 pr-8 text-sm focus:ring-1 focus:outline-none transition-colors duration-200 ${
+                        recentFilter === 'income' 
+                          ? 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed' 
+                          : 'bg-white border-gray-300 text-gray-700 hover:border-gray-400 focus:border-blue-500 focus:ring-blue-500'
+                      }`}
+                      disabled={recentFilter === 'income'}
+                    >
+                      <option value="all">Todos los métodos</option>
+                      <option value="efectivo">Efectivo</option>
+                      <option value="tarjeta">Tarjeta</option>
+                    </select>
+                    <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+                      <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </div>
+                  
+                  {/* Botón para limpiar filtros */}
+                  {(recentFilter !== 'all' || dateFilter !== 'all' || paymentMethodFilter !== 'all') && (
+                    <button
+                      onClick={() => {
+                        setRecentFilterAndResetPage('all');
+                        setDateFilterAndResetPage('all');
+                        setPaymentMethodFilterAndResetPage('all');
+                        setStartDate('');
+                        setEndDate('');
+                      }}
+                      className="flex items-center space-x-1 px-3 py-2 bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-700 rounded-lg text-sm font-medium transition-colors duration-200 border border-gray-200 hover:border-gray-300"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      <span>Limpiar</span>
+                    </button>
+                  )}
+                </div>
                               </div>
 
               {/* Filtros de fecha personalizados */}
@@ -1908,8 +2233,9 @@ export default function Dashboard() {
               ) : (
                 <div className="space-y-3">
                         {currentTransactions.map((transaction) => {
-                          // Determinar si es un pago de tarjeta de crédito
+                          // Determinar si es un pago de tarjeta de crédito o un gasto con tarjeta de crédito
                           const isCreditPayment = transaction.category === 'Pago Tarjeta de Crédito';
+                          const isCreditExpense = transaction.isCreditExpense === true;
                           const isTransfer = transaction.category === 'Transferencia';
                   
                           return (
@@ -1918,7 +2244,7 @@ export default function Dashboard() {
                         ? isTransfer
                           ? 'bg-blue-50 border-blue-400'
                           : 'bg-green-50 border-green-400' 
-                        : isCreditPayment
+                        : isCreditPayment || isCreditExpense
                         ? 'bg-orange-50 border-orange-400'
                         : isTransfer
                         ? 'bg-blue-50 border-blue-400'
@@ -1933,7 +2259,7 @@ export default function Dashboard() {
                               ) : (
                                 <TrendingUp className="h-4 w-4 text-green-600" />
                               )
-                            ) : isCreditPayment ? (
+                            ) : isCreditPayment || isCreditExpense ? (
                               <CreditCard className="h-4 w-4 text-orange-600" />
                             ) : isTransfer ? (
                               <ArrowLeftRight className="h-4 w-4 text-blue-600" />
@@ -1946,7 +2272,7 @@ export default function Dashboard() {
                                       ? isTransfer
                                         ? 'bg-blue-100 text-blue-800'
                                         : 'bg-green-100 text-green-800' 
-                                      : isCreditPayment
+                                      : isCreditPayment || isCreditExpense
                                       ? 'bg-orange-100 text-orange-800'
                                       : isTransfer
                                       ? 'bg-blue-100 text-blue-800'
@@ -1973,7 +2299,7 @@ export default function Dashboard() {
                                     ? isTransfer
                                       ? 'text-blue-600'
                                       : 'text-green-600'
-                                    : isCreditPayment
+                                    : isCreditPayment || isCreditExpense
                                     ? 'text-orange-600'
                                     : isTransfer
                                     ? 'text-blue-600'
@@ -1984,6 +2310,11 @@ export default function Dashboard() {
                             {isCreditPayment && (
                               <p className="text-xs text-orange-600 font-medium">
                                 Pago realizado
+                              </p>
+                            )}
+                            {isCreditExpense && !isCreditPayment && (
+                              <p className="text-xs text-orange-600 font-medium">
+                                Gasto con tarjeta de crédito
                               </p>
                             )}
                             {isTransfer && (
@@ -2938,150 +3269,526 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Abono Modal */}
-        {showAbonoModal && (
+        {/* Modal de Transferencias */}
+        {showTransferModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-lg p-6 w-full max-w-md">
-              <h3 className="text-lg font-semibold mb-4">
-                {selectedBalance?.type === 'future' ? 'Agregar Gasto Futuro' : 'Abonar al Balance'}
-              </h3>
-              <form onSubmit={handleAbono}>
+              <h3 className="text-lg font-semibold mb-4">Transferir entre Balances</h3>
+              <form onSubmit={handleTransfer}>
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Balance: {selectedBalance?.name}
-                    </label>
-                    <p className="text-sm text-gray-600">
-                      Balance actual: ${formatNumberThousands(selectedBalance?.currentAmount || 0)}
-                    </p>
-      </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      {selectedBalance?.type === 'future' ? 'Monto del gasto (COP)' : 'Monto a abonar (COP)'}
-                    </label>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={formatNumberThousands(abonoData.amount)}
-                      onChange={e => {
-                        const raw = parseNumberThousands(e.target.value);
-                        if (/^\d*$/.test(raw)) {
-                          setAbonoData({ ...abonoData, amount: raw });
-                        }
-                      }}
-                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="0"
-                      required
-                    />
-    </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Método de Pago
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Balance Origen
                     </label>
                     <select
-                      value={abonoData.paymentMethod}
-                      onChange={(e) => setAbonoData({...abonoData, paymentMethod: e.target.value, selectedCard: ''})}
-                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      value={transferData.fromBalance}
+                      onChange={(e) => setTransferData({...transferData, fromBalance: e.target.value})}
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      required
                     >
-                      <option value="efectivo">💵 Efectivo</option>
-                      <option value="tarjeta">💳 Tarjeta</option>
+                      <option value="">Seleccionar balance origen</option>
+                      {allBalancesWithAmounts.map(balance => (
+                        <option key={balance.id} value={balance.id}>
+                          {balance.name} - {formatCurrency(balance.currentAmount)}
+                        </option>
+                      ))}
                     </select>
-                    
-                                        {abonoData.paymentMethod === 'tarjeta' && (
-                      <div className="mt-2">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Seleccionar Tarjeta
-                        </label>
-                        <select
-                          value={abonoData.selectedCard || ''}
-                          onChange={(e) => setAbonoData({...abonoData, selectedCard: e.target.value})}
-                          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          required
-                        >
-                          <option value="">Seleccionar tarjeta</option>
-                          {cards.map((card) => (
-                            <option key={card.id} value={card.id}>
-                              {card.type === 'credit' ? '💳' : '💳'} {card.bank} - {card.nickname} (****{card.lastFourDigits})
-                            </option>
-                          ))}
-                        </select>
-                        {cards.length === 0 && (
-                          <p className="text-xs text-orange-600 mt-1">
-                            No tienes tarjetas registradas. <button type="button" onClick={() => setShowCardsModal(true)} className="underline">Agregar tarjeta</button>
-                          </p>
-                        )}
-                        
-                        {/* Mostrar gasto acumulado de la tarjeta seleccionada */}
-                        {abonoData.selectedCard && (
-                          <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center space-x-2">
-                                <CreditCard className="h-4 w-4 text-blue-600" />
-                                <span className="text-sm font-medium text-blue-800">
-                                  Gasto acumulado con esta tarjeta:
-                                </span>
-                              </div>
-                              <span className="text-sm font-semibold text-blue-900">
-                                {formatCurrency(getCardExpenses(abonoData.selectedCard))}
-                              </span>
-                            </div>
-                            {getCardExpenses(abonoData.selectedCard) > 0 && (
-                              <p className="text-xs text-blue-700 mt-1">
-                                Este monto se sumará al total actual
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
 
                   <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Balance Destino
+                    </label>
+                    <select
+                      value={transferData.toBalance}
+                      onChange={(e) => setTransferData({...transferData, toBalance: e.target.value})}
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      required
+                    >
+                      <option value="">Seleccionar balance destino</option>
+                      {allBalancesWithAmounts
+                        .filter(balance => balance.id !== transferData.fromBalance)
+                        .map(balance => (
+                          <option key={balance.id} value={balance.id}>
+                            {balance.name} - {formatCurrency(balance.currentAmount)}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Monto
+                    </label>
+                    <input
+                      type="text"
+                      value={transferData.amount}
+                      onChange={(e) => setTransferData({...transferData, amount: e.target.value})}
+                      placeholder="0"
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Descripción (opcional)
+                    </label>
+                    <input
+                      type="text"
+                      value={transferData.description}
+                      onChange={(e) => setTransferData({...transferData, description: e.target.value})}
+                      placeholder="Transferencia entre balances"
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex space-x-3 mt-6">
+                  <button
+                    type="submit"
+                    disabled={isLoadingTransfer}
+                    className={`flex-1 text-white py-2 px-4 rounded-lg transition-colors ${
+                      isLoadingTransfer 
+                        ? 'bg-blue-400 cursor-not-allowed' 
+                        : 'bg-blue-600 hover:bg-blue-700'
+                    }`}
+                  >
+                    {isLoadingTransfer ? 'Procesando...' : 'Transferir'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeTransferModal}
+                    className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de Tarjetas */}
+        {showCardsModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold">Mis Tarjetas</h3>
+                <button
+                  onClick={closeCardsModal}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {/* Lista de tarjetas */}
+                {cards.length > 0 ? (
+                  <div className="space-y-3">
+                    {cards.map(card => (
+                      <div key={card.id} className="border border-gray-200 rounded-lg p-4">
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-2 mb-2">
+                              <CreditCard className="h-5 w-5 text-blue-600" />
+                              <span className="font-medium">{card.bank}</span>
+                              <span className={`px-2 py-1 text-xs rounded-full ${
+                                card.type === 'credit' 
+                                  ? 'bg-red-100 text-red-800' 
+                                  : 'bg-green-100 text-green-800'
+                              }`}>
+                                {card.type === 'credit' ? 'Crédito' : 'Débito'}
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-600 mb-1">
+                              {card.nickname} •••• {card.lastFourDigits}
+                            </p>
+                            <p className="text-sm font-medium text-gray-800">
+                              Gasto total: {formatCurrency(getCardExpenses(card.id))}
+                            </p>
+                            {card.type === 'credit' && card.creditLimit && (
+                              <p className="text-sm font-medium text-blue-600">
+                                Límite: {formatCurrency(parseInt(card.creditLimit))}
+                              </p>
+                            )}
+                            {card.type === 'credit' && getCreditCardPendingAmount(card.id) > 0 && (
+                              <p className="text-sm font-medium text-red-600">
+                                Pendiente: {formatCurrency(getCreditCardPendingAmount(card.id))}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => openEditCardModal(card)}
+                              className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors duration-200"
+                              title="Editar tarjeta"
+                            >
+                              <Edit3 className="h-4 w-4" />
+                            </button>
+                            {card.type === 'credit' && (
+                              <button
+                                onClick={() => openPayCardModal(card)}
+                                className="p-2 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors duration-200"
+                                title="Pagar tarjeta"
+                              >
+                                <DollarSign className="h-4 w-4" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => deleteCard(card.id)}
+                              className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors duration-200"
+                              title="Eliminar tarjeta"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    <CreditCard className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                    <p>No tienes tarjetas registradas</p>
+                  </div>
+                )}
+
+                {/* Formulario para agregar/editar tarjeta */}
+                <div className="border-t pt-4">
+                  <h4 className="font-medium mb-3">
+                    {editingCard ? 'Editar Tarjeta' : 'Agregar Nueva Tarjeta'}
+                  </h4>
+                  <form onSubmit={addCard} className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Banco
+                        </label>
+                        <select
+                          value={cardData.bank}
+                          onChange={(e) => setCardData({...cardData, bank: e.target.value})}
+                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          required
+                        >
+                          <option value="">Seleccionar banco</option>
+                          <optgroup label="Bancos Colombianas">
+                            <option value="Bancolombia">Bancolombia</option>
+                            <option value="BBVA Colombia">BBVA Colombia</option>
+                            <option value="Davivienda">Davivienda</option>
+                            <option value="Colpatria">Colpatria</option>
+                            <option value="Scotiabank Colpatria">Scotiabank Colpatria</option>
+                            <option value="Citibank Colombia">Citibank Colombia</option>
+                            <option value="HSBC Colombia">HSBC Colombia</option>
+                            <option value="Banco de Bogotá">Banco de Bogotá</option>
+                            <option value="Banco Popular">Banco Popular</option>
+                            <option value="Banco AV Villas">Banco AV Villas</option>
+                            <option value="Banco Caja Social">Banco Caja Social</option>
+                            <option value="Banco Falabella">Banco Falabella</option>
+                            <option value="Banco Pichincha">Banco Pichincha</option>
+                            <option value="Banco Santander">Banco Santander</option>
+                            <option value="Banco Agrario">Banco Agrario</option>
+                            <option value="Banco Cooperativo Coopcentral">Banco Cooperativo Coopcentral</option>
+                            <option value="Bancoomeva">Bancoomeva</option>
+                            <option value="Banco Finandina">Banco Finandina</option>
+                            <option value="Banco Mundo Mujer">Banco Mundo Mujer</option>
+                            <option value="Banco W">Banco W</option>
+                            <option value="Banco Compartir">Banco Compartir</option>
+                            <option value="Banco Serfinanza">Banco Serfinanza</option>
+                            <option value="Banco ProCredit">Banco ProCredit</option>
+                            <option value="Banco Itaú">Banco Itaú</option>
+                            <option value="Banco GNB Sudameris">Banco GNB Sudameris</option>
+                            <option value="Banco de Occidente">Banco de Occidente</option>
+                            <option value="Banco Corpbanca">Banco Corpbanca</option>
+                            <option value="Banco Helm">Banco Helm</option>
+                            <option value="Banco Colmena">Banco Colmena</option>
+                            <option value="Banco Coopcentral">Banco Coopcentral</option>
+                            <option value="Banco Coomeva">Banco Coomeva</option>
+                            <option value="Banco Credifinanciera">Banco Credifinanciera</option>
+                            <option value="Banco Financiero">Banco Financiero</option>
+                            <option value="Banco Finandina">Banco Finandina</option>
+                            <option value="Banco GNB Sudameris">Banco GNB Sudameris</option>
+                            <option value="Banco Itaú">Banco Itaú</option>
+                            <option value="Banco Mundo Mujer">Banco Mundo Mujer</option>
+                            <option value="Banco Pichincha">Banco Pichincha</option>
+                            <option value="Banco Popular">Banco Popular</option>
+                            <option value="Banco ProCredit">Banco ProCredit</option>
+                            <option value="Banco Santander">Banco Santander</option>
+                            <option value="Banco Serfinanza">Banco Serfinanza</option>
+                            <option value="Banco W">Banco W</option>
+                          </optgroup>
+                          <optgroup label="Billeteras Digitales">
+                            <option value="Nequi">Nequi</option>
+                            <option value="Daviplata">Daviplata</option>
+                            <option value="Movii">Movii</option>
+                            <option value="Lulo Bank">Lulo Bank</option>
+                            <option value="RappiPay">RappiPay</option>
+                            <option value="Ualá">Ualá</option>
+                            <option value="Tyba">Tyba</option>
+                            <option value="Powwi">Powwi</option>
+                          </optgroup>
+                          <optgroup label="Internacionales">
+                            <option value="PayPal">PayPal</option>
+                            <option value="Wise">Wise</option>
+                            <option value="Remitly">Remitly</option>
+                            <option value="Western Union">Western Union</option>
+                            <option value="Visa">Visa</option>
+                            <option value="Mastercard">Mastercard</option>
+                            <option value="American Express">American Express</option>
+                          </optgroup>
+                          <option value="Otro">Otro</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Tipo
+                        </label>
+                        <select
+                          value={cardData.type}
+                          onChange={(e) => {
+                            const newType = e.target.value;
+                            setCardData({
+                              ...cardData, 
+                              type: newType,
+                              // Limpiar límite de crédito si se cambia a débito
+                              creditLimit: newType === 'debit' ? '' : cardData.creditLimit
+                            });
+                          }}
+                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        >
+                          <option value="credit">Crédito</option>
+                          <option value="debit">Débito</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Apodo
+                        </label>
+                        <input
+                          type="text"
+                          value={cardData.nickname}
+                          onChange={(e) => setCardData({...cardData, nickname: e.target.value})}
+                          placeholder="Ej: Mi Visa"
+                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Últimos 4 dígitos
+                        </label>
+                        <input
+                          type="text"
+                          value={cardData.lastFourDigits}
+                          onChange={(e) => setCardData({...cardData, lastFourDigits: e.target.value})}
+                          placeholder="1234"
+                          maxLength="4"
+                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          required
+                        />
+                      </div>
+
+                      {cardData.type === 'credit' && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Límite de crédito
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={formatNumberThousands(cardData.creditLimit)}
+                            onChange={(e) => {
+                              const raw = parseNumberThousands(e.target.value);
+                              if (/^\d*$/.test(raw)) {
+                                setCardData({...cardData, creditLimit: raw});
+                              }
+                            }}
+                            placeholder="Ej: 5.000.000"
+                            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">
+                            Monto máximo que puedes gastar con esta tarjeta
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex space-x-3">
+                      <button
+                        type="submit"
+                        disabled={isLoadingCardOperation}
+                        className={`flex-1 text-white py-2 px-4 rounded-lg transition-colors ${
+                          isLoadingCardOperation 
+                            ? 'bg-blue-400 cursor-not-allowed' 
+                            : 'bg-blue-600 hover:bg-blue-700'
+                        }`}
+                      >
+                        {isLoadingCardOperation ? 'Procesando...' : (editingCard ? 'Actualizar' : 'Agregar')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={closeCardsModal}
+                        className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de Pago de Tarjeta */}
+        {showPayCardModal && payingCard && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold">Pagar Tarjeta de Crédito</h3>
+                <button
+                  onClick={() => setShowPayCardModal(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+
+              <div className="mb-4 p-4 bg-gray-50 rounded-lg">
+                <div className="flex items-center space-x-2 mb-2">
+                  <CreditCard className="h-5 w-5 text-blue-600" />
+                  <span className="font-medium">{payingCard.bank}</span>
+                  <span className="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800">
+                    Crédito
+                  </span>
+                </div>
+                <p className="text-sm text-gray-600 mb-1">
+                  {payingCard.nickname} •••• {payingCard.lastFourDigits}
+                </p>
+                <p className="text-sm font-medium text-red-600">
+                  Saldo pendiente: {formatCurrency(getCreditCardPendingAmount(payingCard.id))}
+                </p>
+              </div>
+
+              <form onSubmit={handlePayCreditCard}>
+                <div className="space-y-4">
+                  <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Descripción (Opcional)
+                      Monto a Pagar
+                    </label>
+                    <input
+                      type="text"
+                      value={formatNumberThousands(payAmount)}
+                      onChange={e => {
+                        const raw = parseNumberThousands(e.target.value);
+                        if (/^\d*$/.test(raw)) {
+                          setPayAmount(raw);
+                        }
+                      }}
+                      placeholder="0"
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      required
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Máximo: {formatCurrency(getCreditCardPendingAmount(payingCard.id))}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex space-x-3 mt-6">
+                  <button
+                    type="submit"
+                    disabled={isLoadingCardOperation}
+                    className={`flex-1 text-white py-2 px-4 rounded-lg transition-colors ${
+                      isLoadingCardOperation 
+                        ? 'bg-green-400 cursor-not-allowed' 
+                        : 'bg-green-600 hover:bg-green-700'
+                    }`}
+                  >
+                    {isLoadingCardOperation ? 'Procesando...' : 'Pagar'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowPayCardModal(false)}
+                    className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de Abono */}
+        {showAbonoModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md">
+              <h3 className="text-lg font-semibold mb-4">Realizar Abono</h3>
+              <form onSubmit={handleAbono}>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Balance
+                    </label>
+                    <select
+                      value={abonoData.balanceId}
+                      onChange={(e) => setAbonoData({...abonoData, balanceId: e.target.value})}
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      required
+                    >
+                      <option value="">Seleccionar balance</option>
+                      {allBalancesWithAmounts.map(balance => (
+                        <option key={balance.id} value={balance.id}>
+                          {balance.name} - {formatCurrency(balance.currentAmount)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Monto del Abono
+                    </label>
+                    <input
+                      type="text"
+                      value={abonoData.amount}
+                      onChange={(e) => setAbonoData({...abonoData, amount: e.target.value})}
+                      placeholder="0"
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Descripción (opcional)
                     </label>
                     <input
                       type="text"
                       value={abonoData.description}
                       onChange={(e) => setAbonoData({...abonoData, description: e.target.value})}
-                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder={selectedBalance?.type === 'future' ? "Ej: Compras, servicios, etc." : "Ej: Abono mensual, ahorro extra..."}
+                      placeholder="Descripción del abono"
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                   </div>
-                  
-                  {selectedBalance?.type === 'future' && (
-                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                      <div className="flex items-start space-x-2">
-                        <Calendar className="h-5 w-5 text-orange-600 mt-0.5" />
-                        <div>
-                          <p className="text-sm font-medium text-orange-800">Gasto Futuro</p>
-                          <p className="text-xs text-orange-700 mt-1">
-                            Este gasto se agregará al balance futuro y se pagará en {selectedBalance.targetMonth}. 
-                            No afectará tu balance actual hasta que realices el pago.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
-                
+
                 <div className="flex space-x-3 mt-6">
                   <button
                     type="submit"
                     disabled={isLoadingAbono}
-                    className={`flex-1 flex items-center justify-center space-x-2 text-white py-2 px-4 rounded-lg transition-colors ${
+                    className={`flex-1 text-white py-2 px-4 rounded-lg transition-colors ${
                       isLoadingAbono 
-                        ? 'bg-blue-400 cursor-not-allowed' 
-                        : 'bg-blue-600 hover:bg-blue-700'
+                        ? 'bg-green-400 cursor-not-allowed' 
+                        : 'bg-green-600 hover:bg-green-700'
                     }`}
                   >
-                    {isLoadingAbono && <Loader2 className="h-4 w-4 animate-spin" />}
-                    <span>
-                      {isLoadingAbono ? 'Procesando...' : 
-                       selectedBalance?.type === 'future' ? 'Agregar Gasto' : 'Confirmar Abono'}
-                    </span>
+                    {isLoadingAbono ? 'Procesando...' : 'Realizar Abono'}
                   </button>
                   <button
                     type="button"
@@ -3096,713 +3803,132 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Join Room Modal */}
-        {showJoinRoomModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold">Unirse a Sala</h3>
-                <button
-                  onClick={() => {
-                    setShowJoinRoomModal(false);
-                    setRoomCode('');
-                  }}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              
-              <form onSubmit={joinRoom}>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Código de la Sala
-                    </label>
-                    <input
-                      type="text"
-                      value={roomCode}
-                      onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="Ej: ABC123"
-                      required
-                      autoFocus
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Ingresa el código de 6 caracteres que te compartió el creador de la sala
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="flex space-x-3 mt-6">
-                  <button
-                    type="submit"
-                    className="flex-1 bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors"
-                  >
-                    Unirse a Sala
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowJoinRoomModal(false);
-                      setRoomCode('');
-                    }}
-                    className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition-colors"
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* Create Room Modal */}
-        {showCreateRoomModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold">Crear Nueva Sala</h3>
-                <button
-                  onClick={() => {
-                    setShowCreateRoomModal(false);
-                    setNewRoomData({ name: '', description: '' });
-                  }}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              
-              <form onSubmit={createRoom}>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Nombre de la Sala
-                    </label>
-                    <input
-                      type="text"
-                      value={newRoomData.name}
-                      onChange={(e) => setNewRoomData({...newRoomData, name: e.target.value})}
-                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="Ej: Viaje a Cartagena"
-                      required
-                      autoFocus
-                    />
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Descripción (Opcional)
-                    </label>
-                    <textarea
-                      value={newRoomData.description}
-                      onChange={(e) => setNewRoomData({...newRoomData, description: e.target.value})}
-                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="Describe el propósito de esta sala..."
-                      rows="3"
-                    />
-                  </div>
-                </div>
-                
-                <div className="flex space-x-3 mt-6">
-                  <button
-                    type="submit"
-                    className="flex-1 bg-purple-600 text-white py-2 px-4 rounded-lg hover:bg-purple-700 transition-colors"
-                  >
-                    Crear Sala
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowCreateRoomModal(false);
-                      setNewRoomData({ name: '', description: '' });
-                    }}
-                    className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition-colors"
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* Future Balance Modal */}
+        {/* Modal de Balance Futuro */}
         {showFutureBalanceModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-lg p-6 w-full max-w-md">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold">Crear Balance Futuro</h3>
-                <button
-                  onClick={() => {
-                    setShowFutureBalanceModal(false);
-                    setFutureBalanceData({ name: '', description: '', targetMonth: '' });
-                  }}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              
+              <h3 className="text-lg font-semibold mb-4">Crear Balance Futuro</h3>
               <form onSubmit={createFutureBalance}>
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Nombre del Balance Futuro
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Nombre del Balance
                     </label>
                     <input
                       type="text"
                       value={futureBalanceData.name}
                       onChange={(e) => setFutureBalanceData({...futureBalanceData, name: e.target.value})}
-                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="Ej: Gastos Enero 2024"
+                      placeholder="Ej: Gastos Diciembre 2024"
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       required
-                      autoFocus
                     />
                   </div>
-                  
+
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Descripción
-                    </label>
-                    <textarea
-                      value={futureBalanceData.description}
-                      onChange={(e) => setFutureBalanceData({...futureBalanceData, description: e.target.value})}
-                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="Describe el propósito de este balance futuro..."
-                      rows="3"
-                    />
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Mes de Pago
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Mes Objetivo
                     </label>
                     <input
                       type="month"
                       value={futureBalanceData.targetMonth}
                       onChange={(e) => setFutureBalanceData({...futureBalanceData, targetMonth: e.target.value})}
-                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       required
                     />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Selecciona el mes en que planeas pagar estos gastos de tarjeta de crédito
-                    </p>
                   </div>
-                  
-                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                    <div className="flex items-start space-x-2">
-                      <Calendar className="h-5 w-5 text-orange-600 mt-0.5" />
-                      <div>
-                        <p className="text-sm font-medium text-orange-800">¿Cómo funciona?</p>
-                        <p className="text-xs text-orange-700 mt-1">
-                          Este balance te permitirá registrar gastos con tarjeta de crédito que se pagarán en el mes seleccionado. 
-                          Los gastos se acumularán automáticamente cuando selecciones este balance al crear transacciones.
-                        </p>
-                      </div>
-                    </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Descripción (opcional)
+                    </label>
+                    <textarea
+                      value={futureBalanceData.description}
+                      onChange={(e) => setFutureBalanceData({...futureBalanceData, description: e.target.value})}
+                      placeholder="Descripción del balance futuro"
+                      rows="3"
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
                   </div>
                 </div>
-                
+
                 <div className="flex space-x-3 mt-6">
                   <button
                     type="submit"
-                    className="flex-1 bg-orange-600 text-white py-2 px-4 rounded-lg hover:bg-orange-700 transition-colors"
-                  >
-                    Crear Balance Futuro
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowFutureBalanceModal(false);
-                      setFutureBalanceData({ name: '', description: '', targetMonth: '' });
-                    }}
-                    className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition-colors"
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* Cards Modal */}
-        {showCardsModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold">Mis Tarjetas</h3>
-                <button
-                  onClick={closeCardsModal}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              
-              {/* Lista de tarjetas existentes */}
-              {cards.length > 0 && (
-                <div className="mb-6">
-                  <h4 className="text-md font-medium text-gray-900 mb-3">Tarjetas Registradas</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {cards.map((card) => {
-                      const cardExpenses = getCardExpenses(card.id);
-                      return (
-                        <div key={card.id} className="p-4 border border-gray-200 rounded-lg bg-gray-50">
-                          <div className="flex justify-between items-start">
-                            <div className="flex-1">
-                              <div className="flex items-center space-x-2 mb-1">
-                                <CreditCard className="h-5 w-5 text-gray-600" />
-                                <span className="font-medium text-gray-900">{card.nickname}</span>
-                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                  card.type === 'credit' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'
-                                }`}>
-                                  {card.type === 'credit' ? 'Crédito' : 'Débito'}
-                                </span>
-                              </div>
-                              <p className="text-sm text-gray-600">{card.bank}</p>
-                              <p className="text-sm text-gray-500">****{card.lastFourDigits}</p>
-                              
-                              {/* Mostrar gasto acumulado */}
-                              <div className="mt-2 p-2 bg-white border border-gray-200 rounded">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-xs font-medium text-gray-700">Gasto total:</span>
-                                  <span className={`text-sm font-semibold ${
-                                    cardExpenses > 0 ? 'text-red-600' : 'text-gray-500'
-                                  }`}>
-                                    {formatCurrency(cardExpenses)}
-                                  </span>
-                                </div>
-                                
-                                {/* Mostrar saldo pendiente para tarjetas de crédito */}
-                                {card.type === 'credit' && (
-                                  <div className="flex items-center justify-between mt-1">
-                                    <span className="text-xs font-medium text-orange-700">Pendiente:</span>
-                                    <span className="text-sm font-semibold text-orange-600">
-                                      {formatCurrency(getCreditCardPendingAmount(card.id))}
-                                    </span>
-                                  </div>
-                                )}
-                                
-                                {cardExpenses > 0 && (
-                                  <p className="text-xs text-gray-500 mt-1">
-                                    {personalTransactions.filter(t => t.type === 'expense' && t.selectedCard === card.id).length} transacciones
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex flex-col space-y-1">
-                              <div className="flex space-x-1">
-                                <button
-                                  onClick={() => openEditCardModal(card)}
-                                  className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
-                                  title="Editar tarjeta"
-                                >
-                                  <Edit3 className="h-4 w-4" />
-                                </button>
-                                <button
-                                  onClick={() => deleteCard(card.id)}
-                                  className="p-1 text-gray-400 hover:text-red-600 transition-colors"
-                                  title="Eliminar tarjeta"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                              </div>
-                              
-                              {/* Botón de pago para tarjetas de crédito */}
-                              {card.type === 'credit' && (
-                                <div className="mt-2">
-                                  {(() => {
-                                    const pendingAmount = getCreditCardPendingAmount(card.id);
-                                    
-                                    return pendingAmount > 0 ? (
-                                      <button
-                                        onClick={() => openPayCardModal(card)}
-                                        className="w-full px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
-                                        title="Pagar tarjeta"
-                                      >
-                                        Pagar {formatCurrency(pendingAmount)}
-                                      </button>
-                                    ) : (
-                                      <div className="w-full px-3 py-2 text-sm bg-gray-100 text-gray-500 rounded text-center">
-                                        Sin saldo pendiente
-                                      </div>
-                                    );
-                                  })()}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              
-              {/* Formulario para agregar/editar tarjeta */}
-              <div className="border-t pt-6">
-                <h4 className="text-md font-medium text-gray-900 mb-3">
-                  {editingCard ? 'Editar Tarjeta' : 'Agregar Nueva Tarjeta'}
-                </h4>
-                <form onSubmit={addCard}>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Banco
-                      </label>
-                      <select
-                        value={cardData.bank}
-                        onChange={(e) => setCardData({...cardData, bank: e.target.value})}
-                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        required
-                      >
-                        <option value="">Seleccionar banco</option>
-                        <optgroup label="Bancos Tradicionales">
-                          <option value="Bancolombia">Bancolombia</option>
-                          <option value="BBVA Colombia">BBVA Colombia</option>
-                          <option value="Davivienda">Davivienda</option>
-                          <option value="Colpatria">Colpatria</option>
-                          <option value="Scotiabank">Scotiabank</option>
-                          <option value="Citibank">Citibank</option>
-                          <option value="HSBC">HSBC</option>
-                          <option value="Banco de Bogotá">Banco de Bogotá</option>
-                          <option value="Banco Popular">Banco Popular</option>
-                          <option value="AV Villas">AV Villas</option>
-                          <option value="Banco Caja Social">Banco Caja Social</option>
-                          <option value="Banco Falabella">Banco Falabella</option>
-                          <option value="Banco Pichincha">Banco Pichincha</option>
-                          <option value="Banco Santander">Banco Santander</option>
-                          <option value="Banco de Occidente">Banco de Occidente</option>
-                          <option value="Banco AVAL">Banco AVAL</option>
-                        </optgroup>
-                        <optgroup label="Bancos Digitales">
-                          <option value="Lulo Bank">Lulo Bank</option>
-                          <option value="Movii">Movii</option>
-                          <option value="Tyba">Tyba</option>
-                          <option value="Ualá">Ualá</option>
-                        </optgroup>
-                        <optgroup label="Otros">
-                          <option value="Otro">Otro</option>
-                        </optgroup>
-                      </select>
-                    </div>
-                    
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Tipo de Tarjeta
-                      </label>
-                      <select
-                        value={cardData.type}
-                        onChange={(e) => setCardData({...cardData, type: e.target.value})}
-                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        required
-                      >
-                        <option value="credit">💳 Crédito</option>
-                        <option value="debit">💳 Débito</option>
-                      </select>
-                    </div>
-                    
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Últimos 4 dígitos
-                      </label>
-                      <input
-                        type="text"
-                        value={cardData.lastFourDigits}
-                        onChange={(e) => {
-                          const value = e.target.value.replace(/\D/g, '').slice(0, 4);
-                          setCardData({...cardData, lastFourDigits: value});
-                        }}
-                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        placeholder="1234"
-                        maxLength="4"
-                        required
-                      />
-                    </div>
-                    
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Nombre/Apodo
-                      </label>
-                      <input
-                        type="text"
-                        value={cardData.nickname}
-                        onChange={(e) => setCardData({...cardData, nickname: e.target.value})}
-                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        placeholder="Ej: Tarjeta Principal, Visa Oro..."
-                        required
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="flex space-x-3 mt-6">
-                    <button
-                      type="submit"
-                      disabled={isLoadingCardOperation}
-                      className={`flex-1 py-2 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2 ${
-                        isLoadingCardOperation 
-                          ? 'bg-indigo-400 cursor-not-allowed' 
-                          : 'bg-indigo-600 hover:bg-indigo-700'
-                      } text-white`}
-                    >
-                      {isLoadingCardOperation ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          <span>Procesando...</span>
-                        </>
-                      ) : (
-                        <span>{editingCard ? 'Actualizar Tarjeta' : 'Agregar Tarjeta'}</span>
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={closeCardsModal}
-                      className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition-colors"
-                    >
-                      {editingCard ? 'Cancelar' : 'Cerrar'}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Modal de Pago de Tarjeta de Crédito */}
-        {showPayCardModal && payingCard && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold">Pagar Tarjeta de Crédito</h3>
-                <button
-                  onClick={closePayCardModal}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              
-              <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-                <div className="flex items-center space-x-2 mb-2">
-                  <CreditCard className="h-5 w-5 text-gray-600" />
-                  <span className="font-medium">{payingCard.nickname}</span>
-                  <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                    Crédito
-                  </span>
-                </div>
-                <p className="text-sm text-gray-600">{payingCard.bank} (****{payingCard.lastFourDigits})</p>
-                <div className="mt-2 flex justify-between">
-                  <span className="text-sm font-medium text-gray-700">Saldo pendiente:</span>
-                  <span className="text-sm font-semibold text-orange-600">
-                    {formatCurrency(getCreditCardPendingAmount(payingCard.id))}
-                  </span>
-                </div>
-              </div>
-              
-              <form onSubmit={handlePayCreditCard}>
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Monto a pagar
-                  </label>
-                  <input
-                    type="text"
-                    value={payAmount}
-                    onChange={(e) => setPayAmount(formatNumberThousands(e.target.value))}
-                    placeholder="0"
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                    required
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Máximo: {formatCurrency(getCreditCardPendingAmount(payingCard.id))}
-                  </p>
-                </div>
-                
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
-                  <div className="flex items-start space-x-2">
-                    <svg className="h-5 w-5 text-green-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <div>
-                      <p className="text-sm font-medium text-green-800">¿Cómo funciona?</p>
-                      <p className="text-xs text-green-700 mt-1">
-                        Al pagar la tarjeta, se registrará como un gasto en efectivo que se descontará de tus ingresos disponibles.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="flex space-x-3">
-                  <button
-                    type="submit"
-                    disabled={isLoadingCardOperation}
-                    className={`flex-1 py-2 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2 ${
-                      isLoadingCardOperation 
-                        ? 'bg-green-400 cursor-not-allowed' 
-                        : 'bg-green-600 hover:bg-green-700'
-                    } text-white`}
-                  >
-                    {isLoadingCardOperation ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Procesando...</span>
-                      </>
-                    ) : (
-                      <span>Registrar Pago</span>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={closePayCardModal}
-                    className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition-colors"
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* Modal de Transferencia entre Balances */}
-        {showTransferModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold">Transferir entre Balances</h3>
-                <button
-                  onClick={closeTransferModal}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              
-              <form onSubmit={handleTransfer} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Balance Origen
-                  </label>
-                  <select
-                    value={transferData.fromBalance}
-                    onChange={(e) => setTransferData({...transferData, fromBalance: e.target.value})}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  >
-                    <option value="">Selecciona el balance origen</option>
-                    {allBalancesWithAmounts.map(balance => (
-                      <option key={balance.id} value={balance.id}>
-                        {balance.name} - {formatCurrency(balance.currentAmount)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Balance Destino
-                  </label>
-                  <select
-                    value={transferData.toBalance}
-                    onChange={(e) => setTransferData({...transferData, toBalance: e.target.value})}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  >
-                    <option value="">Selecciona el balance destino</option>
-                    {allBalancesWithAmounts
-                      .filter(balance => balance.id !== transferData.fromBalance)
-                      .map(balance => (
-                        <option key={balance.id} value={balance.id}>
-                          {balance.name} - {formatCurrency(balance.currentAmount)}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Monto
-                  </label>
-                  <input
-                    type="text"
-                    value={transferData.amount}
-                    onChange={(e) => setTransferData({...transferData, amount: formatNumberThousands(e.target.value)})}
-                    placeholder="0"
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Descripción (opcional)
-                  </label>
-                  <input
-                    type="text"
-                    value={transferData.description}
-                    onChange={(e) => setTransferData({...transferData, description: e.target.value})}
-                    placeholder="Ej: Transferencia para ahorro"
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                </div>
-
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
-                  <div className="flex items-start space-x-2">
-                    <ArrowLeftRight className="h-5 w-5 text-blue-600 mt-0.5" />
-                    <div>
-                      <p className="text-sm font-medium text-blue-800">¿Cómo funciona?</p>
-                      <p className="text-xs text-blue-700 mt-1">
-                        Se creará un egreso en el balance origen y un ingreso en el balance destino por el mismo monto.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="flex space-x-3">
-                  <button
-                    type="button"
-                    onClick={closeTransferModal}
-                    className="flex-1 px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isLoadingTransfer}
-                    className={`flex-1 px-4 py-2 rounded-lg transition-colors flex items-center justify-center space-x-2 ${
-                      isLoadingTransfer 
+                    disabled={isLoadingBalance}
+                    className={`flex-1 text-white py-2 px-4 rounded-lg transition-colors ${
+                      isLoadingBalance 
                         ? 'bg-blue-400 cursor-not-allowed' 
                         : 'bg-blue-600 hover:bg-blue-700'
-                    } text-white`}
+                    }`}
                   >
-                    {isLoadingTransfer ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Procesando...</span>
-                      </>
-                    ) : (
-                      <span>Transferir</span>
-                    )}
+                    {isLoadingBalance ? 'Creando...' : 'Crear Balance Futuro'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowFutureBalanceModal(false)}
+                    className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400"
+                  >
+                    Cancelar
                   </button>
                 </div>
               </form>
             </div>
           </div>
         )}
+
+        {/* Alerta Personalizada */}
+        {customAlert.show && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+            <div className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 transform transition-all duration-300 scale-100">
+              <div className="p-6">
+                <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 rounded-full bg-blue-100">
+                  {customAlert.type === 'confirm' && (
+                    <AlertTriangle className="h-6 w-6 text-blue-600" />
+                  )}
+                  {customAlert.type === 'info' && (
+                    <AlertTriangle className="h-6 w-6 text-blue-600" />
+                  )}
+                  {customAlert.type === 'warning' && (
+                    <AlertTriangle className="h-6 w-6 text-yellow-600" />
+                  )}
+                  {customAlert.type === 'error' && (
+                    <AlertTriangle className="h-6 w-6 text-red-600" />
+                  )}
+                </div>
+                
+                <h3 className="text-lg font-semibold text-gray-900 text-center mb-2">
+                  {customAlert.title}
+                </h3>
+                
+                <p className="text-gray-600 text-center mb-6">
+                  {customAlert.message}
+                </p>
+                
+                <div className="flex space-x-3">
+                  <button
+                    onClick={handleAlertCancel}
+                    className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors duration-200 font-medium"
+                  >
+                    {customAlert.cancelText}
+                  </button>
+                  <button
+                    onClick={handleAlertConfirm}
+                    className={`flex-1 px-4 py-2 text-white rounded-lg transition-colors duration-200 font-medium ${
+                      customAlert.type === 'error' 
+                        ? 'bg-red-600 hover:bg-red-700'
+                        : customAlert.type === 'warning'
+                        ? 'bg-yellow-600 hover:bg-yellow-700'
+                        : 'bg-blue-600 hover:bg-blue-700'
+                    }`}
+                  >
+                    {customAlert.confirmText}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );
